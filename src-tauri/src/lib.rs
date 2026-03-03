@@ -13,6 +13,12 @@ struct Chunk {
     content: String,
 }
 
+#[derive(Serialize, FromRow)]
+struct Book {
+    id: String,
+    title: String,
+}
+
 
 fn load_or_create_faiss() -> VectorIndex {
     let path = "../storage/faiss.index";
@@ -102,6 +108,7 @@ async fn upload_pdf(path: String, pool: tauri::State<'_, SqlitePool>)
 #[tauri::command]
 async fn search_context(
     query: String,
+    book_id: Option<String>,
     pool: tauri::State<'_, SqlitePool>
 ) -> Result<Vec<String>, String> {
 
@@ -113,15 +120,26 @@ async fn search_context(
     let mut results = Vec::new();
 
     for id in ids {
-        let row: (String,) = sqlx::query_as(
+        let query_str = if book_id.is_some() {
+            "SELECT content FROM chunks WHERE faiss_id = ? AND book_id = ?"
+        } else {
             "SELECT content FROM chunks WHERE faiss_id = ?"
-        )
-        .bind(id as i64)
-        .fetch_one(pool.inner())
-        .await
-        .unwrap();
+        };
 
-        results.push(row.0);
+        let mut query = sqlx::query_as::<_, (String,)>(query_str)
+            .bind(id as i64);
+
+        if let Some(ref bid) = book_id {
+            query = query.bind(bid);
+        }
+
+        let row = query.fetch_optional(pool.inner())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if let Some(r) = row {
+            results.push(r.0);
+        }
     }
 
 
@@ -129,8 +147,27 @@ async fn search_context(
 }
 
 #[tauri::command]
-async fn get_chunks(pool: tauri::State<'_, SqlitePool>) -> Result<Vec<Chunk>, String> {
-    sqlx::query_as::<_, Chunk>("SELECT id, book_id, chunk_index, content FROM chunks")
+async fn get_chunks(
+    book_id: Option<String>,
+    pool: tauri::State<'_, SqlitePool>
+) -> Result<Vec<Chunk>, String> {
+    if let Some(bid) = book_id {
+        sqlx::query_as::<_, Chunk>("SELECT id, book_id, chunk_index, content FROM chunks WHERE book_id = ?")
+            .bind(bid)
+            .fetch_all(pool.inner())
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        sqlx::query_as::<_, Chunk>("SELECT id, book_id, chunk_index, content FROM chunks")
+            .fetch_all(pool.inner())
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[tauri::command]
+async fn get_books(pool: tauri::State<'_, SqlitePool>) -> Result<Vec<Book>, String> {
+    sqlx::query_as::<_, Book>("SELECT id, title FROM books")
         .fetch_all(pool.inner())
         .await
         .map_err(|e| e.to_string())
@@ -144,7 +181,7 @@ pub fn run() {
         .manage(pool)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context, get_chunks])
+        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context, get_chunks, get_books])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

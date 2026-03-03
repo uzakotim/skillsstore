@@ -4,7 +4,11 @@ import { Button } from "@/components/ui/button";
 import { useSetAtom } from "jotai";
 import { consoleMsgAtom } from "@/store/atoms";
 
-export default function UploadButton() {
+interface UploadButtonProps {
+  onUpload?: () => void;
+}
+
+export default function UploadButton({ onUpload }: UploadButtonProps) {
   const setConsoleMsg = useSetAtom(consoleMsgAtom);
 
   async function handleUpload() {
@@ -18,6 +22,7 @@ export default function UploadButton() {
 
       await invoke("upload_pdf", { path: selected });
       setConsoleMsg("Book uploaded and indexed!");
+      if (onUpload) onUpload();
     } catch (error) {
       console.error("Failed to upload book:", error);
       setConsoleMsg(`Error: ${error}`);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "./App.css";
 import UploadButton from "@/components/custom/UploadButton";
 import { useAtom } from "jotai";
@@ -13,19 +13,41 @@ interface Chunk {
   content: string;
 }
 
+interface Book {
+  id: string;
+  title: string;
+}
+
 function App() {
   const [consoleMsg, setConsoleMsg] = useAtom(consoleMsgAtom);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [selectedBookId, setSelectedBookId] = useState<string>("");
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [aiResponse, setAiResponse] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
+  const fetchBooks = useCallback(async () => {
+    try {
+      const data = await invoke<Book[]>("get_books");
+      setBooks(data);
+    } catch (error) {
+      console.error("Error fetching books:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchBooks();
+  }, [fetchBooks]);
+
   const handleGetChunks = async () => {
     try {
-      const data = await invoke<Chunk[]>("get_chunks");
+      const data = await invoke<Chunk[]>("get_chunks", { 
+        bookId: selectedBookId || null 
+      });
       setChunks(data);
-      setConsoleMsg(`Fetched ${data.length} chunks`);
+      setConsoleMsg(`Fetched ${data.length} chunks${selectedBookId ? " for selected book" : ""}`);
     } catch (error) {
       setConsoleMsg(`Error fetching chunks: ${error}`);
     }
@@ -37,9 +59,12 @@ function App() {
         setConsoleMsg("Please enter a search query");
         return;
       }
-      const results = await invoke<string[]>("search_context", { query: searchQuery });
+      const results = await invoke<string[]>("search_context", { 
+        query: searchQuery,
+        bookId: selectedBookId || null
+      });
       setSearchResults(results);
-      setConsoleMsg(`Found ${results.length} relevant context chunks`);
+      setConsoleMsg(`Found ${results.length} relevant chunks${selectedBookId ? " (filtered by book)" : ""}`);
     } catch (error) {
       setConsoleMsg(`Search error: ${error}`);
     }
@@ -53,7 +78,6 @@ function App() {
     setIsGenerating(true);
     setConsoleMsg("Simulating LLM generation...");
     
-    // Simulate LLM delay
     setTimeout(() => {
       setAiResponse("This is a simulated AI response based on the context retrieved above. In the future, this will be replaced by an actual call to an LLM like DeepSeek or GPT-4, using the retrieved chunks as context.");
       setIsGenerating(false);
@@ -70,10 +94,27 @@ function App() {
         <p className="text-muted-foreground">Retrieval-Augmented Generation Dashboard</p>
       </header>
 
-      <div className="flex gap-4 items-center">
-        <UploadButton />
+      <div className="flex gap-4 items-center flex-wrap justify-center">
+        <UploadButton onUpload={fetchBooks} />
+        
+        <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-lg border">
+          <label className="text-xs font-medium px-2">Focus:</label>
+          <select 
+            className="bg-transparent text-sm p-1.5 outline-none border-none min-w-[150px]"
+            value={selectedBookId}
+            onChange={(e) => setSelectedBookId(e.target.value)}
+          >
+            <option value="">All Uploaded Books</option>
+            {books.map((book) => (
+              <option key={book.id} value={book.id}>
+                {book.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <Button variant="outline" onClick={handleGetChunks}>
-          Fetch All Chunks
+          {selectedBookId ? "View Book Chunks" : "View All Chunks"}
         </Button>
       </div>
 
@@ -81,7 +122,7 @@ function App() {
         <div className="flex gap-2">
           <input
             type="text"
-            placeholder="Search in context..."
+            placeholder={selectedBookId ? "Search in this book..." : "Search in all books..."}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -152,7 +193,7 @@ function App() {
               ))}
             </div>
           ) : (
-             <p className="text-sm text-muted-foreground italic text-center py-20 border rounded-lg">Click "Fetch All Chunks" to view database contents.</p>
+             <p className="text-sm text-muted-foreground italic text-center py-20 border rounded-lg">Click "View Chunks" to see database contents.</p>
           )}
         </section>
       </div>
