@@ -94,13 +94,14 @@ function App() {
       return;
     }
     setIsGenerating(true);
-    setConsoleMsg("Simulating LLM generation...");
-    
-    setTimeout(() => {
-      setAiResponse("This is a simulated AI response based on the context retrieved above. In the future, this will be replaced by an actual call to an LLM like DeepSeek or GPT-4, using the retrieved chunks as context.");
-      setIsGenerating(false);
-      setConsoleMsg("AI generation complete (Simulation)");
-    }, 1500);
+    setConsoleMsg("Generating response...");
+    const response = await invoke("generate_response", { 
+      query: searchQuery,
+      bookId: selectedBookId || null
+    });
+    setAiResponse(response);
+    setIsGenerating(false);
+    setConsoleMsg("AI generation complete!");
   };
 
   return (

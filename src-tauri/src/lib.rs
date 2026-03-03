@@ -146,6 +146,56 @@ async fn search_context(
     Ok(results)
 }
 
+#[derive(serde::Deserialize)]
+struct OllamaGenerateResponse {
+    response: String,
+}
+
+#[derive(serde::Serialize)]
+struct OllamaGenerateRequest {
+    model: String,
+    prompt: String,
+    stream: bool,
+}
+
+#[tauri::command]
+async fn generate_response(
+    query: String,
+    book_id: Option<String>,
+    pool: tauri::State<'_, SqlitePool>
+) -> Result<String, String> {
+    // 1. Get context through search
+    let context_results = search_context(query.clone(), book_id, pool).await?;
+    let context = context_results.join("\n\n");
+
+    // 2. Build prompt
+    let prompt = format!(
+        "Use the following pieces of retrieved context to answer the user's question. \
+        If you don't know the answer based on the context, just say that you don't know, \
+        don't try to make up an answer. Keep the answer concise and relevant.\n\n\
+        Context:\n{}\n\nQuestion: {}\n\nAnswer:",
+        context, query
+    );
+
+    // 3. Call Ollama gemma2:2b
+    let client = reqwest::Client::new();
+    let res = client
+        .post("http://localhost:11434/api/generate")
+        .json(&OllamaGenerateRequest {
+            model: "gemma2:2b".to_string(),
+            prompt,
+            stream: false,
+        })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let body: OllamaGenerateResponse = res.json().await.map_err(|e| e.to_string())?;
+
+    Ok(body.response)
+}
+
+
 #[tauri::command]
 async fn get_chunks(
     book_id: Option<String>,
@@ -199,7 +249,7 @@ pub fn run() {
         .manage(pool)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context, get_chunks, get_books, delete_book])
+        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context, get_chunks, get_books, delete_book, generate_response])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
