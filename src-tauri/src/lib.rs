@@ -173,6 +173,24 @@ async fn get_books(pool: tauri::State<'_, SqlitePool>) -> Result<Vec<Book>, Stri
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn delete_book(book_id: String, pool: tauri::State<'_, SqlitePool>) -> Result<(), String> {
+    // Delete chunks first due to potential foreign key or just logical grouping
+    sqlx::query("DELETE FROM chunks WHERE book_id = ?")
+        .bind(&book_id)
+        .execute(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query("DELETE FROM books WHERE id = ?")
+        .bind(&book_id)
+        .execute(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pool = tauri::async_runtime::block_on(db::init_db());
@@ -181,7 +199,7 @@ pub fn run() {
         .manage(pool)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context, get_chunks, get_books])
+        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context, get_chunks, get_books, delete_book])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
