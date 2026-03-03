@@ -1,0 +1,2 @@
+ollama pull nomic-embed-text:latest
+ollama pull gemma2:2b

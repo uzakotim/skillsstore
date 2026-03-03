@@ -4,6 +4,7 @@ use rag::embedder::embed;
 use rag::faiss::VectorIndex;
 use sqlx::{SqlitePool, FromRow};
 use serde::Serialize;
+use tauri::Manager;
 
 #[derive(Serialize, FromRow)]
 struct Chunk {
@@ -20,10 +21,14 @@ struct Book {
 }
 
 
-fn load_or_create_faiss() -> VectorIndex {
-    let path = "../storage/faiss.index";
-    if std::path::Path::new(path).exists() {
-        VectorIndex::load(path)
+struct AppStorage {
+    dir: std::path::PathBuf,
+}
+
+fn load_or_create_faiss(storage_dir: &std::path::Path) -> VectorIndex {
+    let path = storage_dir.join("faiss.index");
+    if path.exists() {
+        VectorIndex::load(path.to_str().unwrap())
     } else {
         VectorIndex::new(768) // nomic-embed-text dimension
     }
@@ -50,9 +55,11 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
-async fn upload_pdf(path: String, pool: tauri::State<'_, SqlitePool>)
-    -> Result<(), String>
-{
+async fn upload_pdf(
+    path: String, 
+    pool: tauri::State<'_, SqlitePool>,
+    storage: tauri::State<'_, AppStorage>
+) -> Result<(), String> {
     let book_id = uuid::Uuid::new_v4().to_string();
     let title = std::path::Path::new(&path)
         .file_stem()
@@ -77,7 +84,7 @@ async fn upload_pdf(path: String, pool: tauri::State<'_, SqlitePool>)
 
     let chunks = chunk_with_overlap(&text, 250, 50);
 
-    let mut index = load_or_create_faiss();
+    let mut index = load_or_create_faiss(&storage.dir);
     let mut current_faiss_id = index.ntotal() as i64;
 
     for (i, chunk) in chunks.iter().enumerate() {
@@ -95,13 +102,13 @@ async fn upload_pdf(path: String, pool: tauri::State<'_, SqlitePool>)
         .bind(current_faiss_id)
         .execute(pool.inner())
         .await
-        .unwrap();
+        .map_err(|e| e.to_string())?;
 
 
         current_faiss_id += 1;
     }
 
-    index.save("../storage/faiss.index");
+    index.save(storage.dir.join("faiss.index").to_str().unwrap());
 
     Ok(())
 }
@@ -109,12 +116,12 @@ async fn upload_pdf(path: String, pool: tauri::State<'_, SqlitePool>)
 async fn search_context(
     query: String,
     book_id: Option<String>,
-    pool: tauri::State<'_, SqlitePool>
+    pool: tauri::State<'_, SqlitePool>,
+    storage: tauri::State<'_, AppStorage>
 ) -> Result<Vec<String>, String> {
 
     let query_embedding = embed(&query).await?;
-
-    let mut index = VectorIndex::load("../storage/faiss.index");
+    let mut index = load_or_create_faiss(&storage.dir);
     let ids = index.search(&query_embedding, 5);
 
     let mut results = Vec::new();
@@ -162,10 +169,11 @@ struct OllamaGenerateRequest {
 async fn generate_response(
     query: String,
     book_id: Option<String>,
-    pool: tauri::State<'_, SqlitePool>
+    pool: tauri::State<'_, SqlitePool>,
+    storage: tauri::State<'_, AppStorage>
 ) -> Result<String, String> {
     // 1. Get context through search
-    let context_results = search_context(query.clone(), book_id, pool).await?;
+    let context_results = search_context(query.clone(), book_id, pool, storage).await?;
     let context = context_results.join("\n\n");
 
     // 2. Build prompt
@@ -261,7 +269,8 @@ async fn generate_learning_path(
 async fn generate_lesson(
     concept: String,
     book_id: String,
-    pool: tauri::State<'_, SqlitePool>
+    pool: tauri::State<'_, SqlitePool>,
+    storage: tauri::State<'_, AppStorage>
 ) -> Result<String, String> {
     // Check if lesson already exists
     let existing = sqlx::query_as::<_, (String,)>("SELECT content FROM lessons WHERE book_id = ? AND concept = ?")
@@ -276,7 +285,7 @@ async fn generate_lesson(
     }
 
     // Search for context about this specific concept
-    let context_results = search_context(concept.clone(), Some(book_id.clone()), pool.clone()).await?;
+    let context_results = search_context(concept.clone(), Some(book_id.clone()), pool.clone(), storage).await?;
     let context = context_results.join("\n\n");
 
     let prompt = format!(
@@ -389,10 +398,24 @@ async fn delete_book(book_id: String, pool: tauri::State<'_, SqlitePool>) -> Res
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let pool = tauri::async_runtime::block_on(db::init_db());
-
     tauri::Builder::default()
-        .manage(pool)
+        .setup(|app| {
+            let app_data_dir = app.path().app_data_dir().expect("failed to get app data dir");
+            std::fs::create_dir_all(&app_data_dir).expect("failed to create app data dir");
+            
+            let db_path = app_data_dir.join("app.db");
+            let options = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(db_path.clone())
+                .create_if_missing(true);
+            
+            let pool = tauri::async_runtime::block_on(db::init_db(options))
+                .unwrap_or_else(|e| panic!("failed to initialize database at {:?}: {}", db_path, e));
+            
+            app.manage(pool);
+            app.manage(AppStorage { dir: app_data_dir });
+            
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![

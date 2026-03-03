@@ -1,14 +1,13 @@
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{SqlitePool, sqlite::{SqlitePoolOptions, SqliteConnectOptions}};
 
-pub async fn init_db() -> SqlitePool {
+pub async fn init_db(options: SqliteConnectOptions) -> Result<SqlitePool, sqlx::Error> {
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect("sqlite:../storage/app.db")
-        .await
-        .unwrap();
+        .connect_with(options)
+        .await?;
 
     // Enable foreign keys
-    sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await.unwrap();
+    sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await?;
 
     sqlx::query(
         r#"
@@ -19,7 +18,7 @@ pub async fn init_db() -> SqlitePool {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         "#
-    ).execute(&pool).await.unwrap();
+    ).execute(&pool).await?;
 
     sqlx::query(
         r#"
@@ -31,7 +30,7 @@ pub async fn init_db() -> SqlitePool {
             faiss_id INTEGER NOT NULL
         );
         "#
-    ).execute(&pool).await.unwrap();
+    ).execute(&pool).await?;
 
     sqlx::query(
         r#"
@@ -43,7 +42,7 @@ pub async fn init_db() -> SqlitePool {
             FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
         );
         "#
-    ).execute(&pool).await.unwrap();
+    ).execute(&pool).await?;
 
     sqlx::query(
         r#"
@@ -56,7 +55,7 @@ pub async fn init_db() -> SqlitePool {
             FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
         );
         "#
-    ).execute(&pool).await.unwrap();
+    ).execute(&pool).await?;
 
-    pool
+    Ok(pool)
 }
