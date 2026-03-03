@@ -5,6 +5,8 @@ import { useAtom } from "jotai";
 import { consoleMsgAtom } from "@/store/atoms";
 import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api/core";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Chunk {
   id: number;
@@ -176,11 +178,12 @@ function App() {
           <section className="flex flex-col gap-4">
             <h2 className="text-xl font-semibold border-b pb-2 flex justify-between items-center">
               AI Response 
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-normal">Placeholder</span>
             </h2>
             {aiResponse ? (
-              <div className="p-6 rounded-xl bg-primary/5 border border-primary/20 text-sm leading-relaxed shadow-sm">
-                {aiResponse}
+              <div className="p-6 rounded-xl bg-primary/5 border border-primary/20 text-sm leading-relaxed shadow-sm prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {aiResponse}
+                </ReactMarkdown>
               </div>
             ) : (
               <div className="h-24 flex items-center justify-center border border-dashed rounded-xl text-muted-foreground text-sm italic">
