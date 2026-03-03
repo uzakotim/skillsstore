@@ -7,6 +7,9 @@ pub async fn init_db() -> SqlitePool {
         .await
         .unwrap();
 
+    // Enable foreign keys
+    sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await.unwrap();
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS books (
@@ -26,6 +29,31 @@ pub async fn init_db() -> SqlitePool {
             chunk_index INTEGER NOT NULL,
             content TEXT NOT NULL,
             faiss_id INTEGER NOT NULL
+        );
+        "#
+    ).execute(&pool).await.unwrap();
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS learning_paths (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            book_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+        );
+        "#
+    ).execute(&pool).await.unwrap();
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS lessons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            book_id TEXT NOT NULL,
+            concept TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
         );
         "#
     ).execute(&pool).await.unwrap();

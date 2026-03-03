@@ -29,6 +29,10 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [aiResponse, setAiResponse] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [mode, setMode] = useState<"search" | "learn">("search");
+  const [learningPath, setLearningPath] = useState("");
+  const [lesson, setLesson] = useState("");
+  const [selectedConcept, setSelectedConcept] = useState("");
 
   const fetchBooks = useCallback(async () => {
     try {
@@ -43,6 +47,34 @@ function App() {
     fetchBooks();
   }, [fetchBooks]);
 
+  useEffect(() => {
+    const loadStoredData = async () => {
+      if (!selectedBookId) {
+        setLearningPath("");
+        setLesson("");
+        setSelectedConcept("");
+        return;
+      }
+
+      try {
+        const storedPath = await invoke<string | null>("get_stored_learning_path", { bookId: selectedBookId });
+        if (storedPath) {
+          setLearningPath(storedPath);
+        } else {
+          setLearningPath("");
+        }
+        
+        // Reset lesson view when changing books
+        setLesson("");
+        setSelectedConcept("");
+      } catch (error) {
+        console.error("Error loading stored data:", error);
+      }
+    };
+
+    loadStoredData();
+  }, [selectedBookId]);
+
   const handleDeleteBook = async () => {
     if (!selectedBookId) return;
     
@@ -55,6 +87,9 @@ function App() {
       setSelectedBookId("");
       setChunks([]);
       setSearchResults([]);
+      setLearningPath("");
+      setLesson("");
+      setSelectedConcept("");
       fetchBooks();
     } catch (error) {
       setConsoleMsg(`Error deleting book: ${error}`);
@@ -97,13 +132,52 @@ function App() {
     }
     setIsGenerating(true);
     setConsoleMsg("Generating response...");
-    const response = await invoke("generate_response", { 
+    const response = await invoke<string>("generate_response", { 
       query: searchQuery,
       bookId: selectedBookId || null
     });
     setAiResponse(response);
     setIsGenerating(false);
     setConsoleMsg("AI generation complete!");
+  };
+
+  const handleGenerateLearningPath = async () => {
+    if (!selectedBookId) {
+      setConsoleMsg("Please select a book first");
+      return;
+    }
+    setIsGenerating(true);
+    setConsoleMsg("Generating learning path...");
+    try {
+      const path = await invoke<string>("generate_learning_path", { 
+        bookId: selectedBookId 
+      });
+      setLearningPath(path);
+      setConsoleMsg("Learning path generated!");
+    } catch (error) {
+      setConsoleMsg(`Error: ${error}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGetLesson = async (concept: string) => {
+    if (!selectedBookId) return;
+    setSelectedConcept(concept);
+    setIsGenerating(true);
+    setConsoleMsg(`Generating lesson for ${concept}...`);
+    try {
+      const result = await invoke<string>("generate_lesson", { 
+        concept, 
+        bookId: selectedBookId 
+      });
+      setLesson(result);
+      setConsoleMsg("Lesson generated!");
+    } catch (error) {
+      setConsoleMsg(`Error: ${error}`);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -115,13 +189,34 @@ function App() {
         <p className="text-muted-foreground">Retrieval-Augmented Generation Dashboard</p>
       </header>
 
-      <div className="flex gap-4 items-center flex-wrap justify-center">
+      <div className="flex gap-4 items-center flex-wrap justify-center bg-card p-4 rounded-2xl border shadow-sm w-full max-w-4xl">
+        <div className="flex gap-2 p-1 bg-muted rounded-xl">
+          <Button 
+            variant={mode === "search" ? "default" : "ghost"} 
+            size="sm"
+            onClick={() => setMode("search")}
+            className="rounded-lg px-6"
+          >
+            Search Mode
+          </Button>
+          <Button 
+            variant={mode === "learn" ? "default" : "ghost"} 
+            size="sm"
+            onClick={() => setMode("learn")}
+            className="rounded-lg px-6"
+          >
+            Learn Mode
+          </Button>
+        </div>
+
+        <div className="h-8 w-px bg-border mx-2" />
+
         <UploadButton onUpload={fetchBooks} />
         
         <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-lg border">
-          <label className="text-xs font-medium px-2">Focus:</label>
+          <label className="text-xs font-medium px-2">Book:</label>
           <select 
-            className="bg-transparent text-sm p-1.5 outline-none border-none min-w-[150px]"
+            className="bg-transparent text-sm p-1.5 outline-none border-none min-w-[200px]"
             value={selectedBookId}
             onChange={(e) => setSelectedBookId(e.target.value)}
           >
@@ -145,91 +240,179 @@ function App() {
           )}
         </div>
 
-        <Button variant="outline" onClick={handleGetChunks}>
-          {selectedBookId ? "View Book Chunks" : "View All Chunks"}
+        <Button variant="outline" onClick={handleGetChunks} size="sm">
+          {selectedBookId ? "Debug: View Chunks" : "Debug: View All"}
         </Button>
-      </div>
-
-      <div className="flex flex-col gap-4 w-full max-w-2xl mt-4">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder={selectedBookId ? "Search in this book..." : "Search in all books..."}
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          />
-          <Button onClick={handleSearch}>
-            Search
-          </Button>
-          <Button variant="secondary" onClick={handleGenerate} disabled={isGenerating || searchResults.length === 0}>
-            {isGenerating ? "Generating..." : "Ask AI"}
-          </Button>
-        </div>
       </div>
 
       <div className="flex flex-col gap-2 items-center">
          <span className="text-xs font-mono bg-muted px-2 py-1 rounded shadow-sm border">Status: {consoleMsg}</span>
       </div>
 
-      <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-8 mt-4">
-        <div className="flex flex-col gap-6">
-          <section className="flex flex-col gap-4">
-            <h2 className="text-xl font-semibold border-b pb-2 flex justify-between items-center">
-              AI Response 
-            </h2>
-            {aiResponse ? (
-              <div className="p-6 rounded-xl bg-primary/5 border border-primary/20 text-sm leading-relaxed shadow-sm prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {aiResponse}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <div className="h-24 flex items-center justify-center border border-dashed rounded-xl text-muted-foreground text-sm italic">
-                {isGenerating ? "Reasoning..." : "Search and click 'Ask AI' to generate a response."}
-              </div>
-            )}
-          </section>
-
-          <section className="flex flex-col gap-4">
-            <h2 className="text-xl font-semibold border-b pb-2">Retrieved Context</h2>
-            {searchResults.length > 0 ? (
-              <div className="flex flex-col gap-3">
-                {searchResults.map((res, i) => (
-                  <div key={i} className="p-4 rounded-lg bg-card border text-sm shadow-sm hover:shadow-md transition-shadow">
-                     <p className="text-card-foreground">"{res}"</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground italic text-center py-10 border rounded-lg">No context retrieved yet.</p>
-            )}
-          </section>
-        </div>
-
-        <section className="flex flex-col gap-4">
-          <h2 className="text-xl font-semibold border-b pb-2 flex justify-between items-center">
-            Database Chunks
-            <span className="text-xs font-normal text-muted-foreground">{chunks.length} objects</span>
-          </h2>
-          {chunks.length > 0 ? (
-            <div className="flex flex-col gap-3 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
-              {chunks.map((chunk) => (
-                <div key={chunk.id} className="p-4 rounded-lg bg-muted/30 border text-xs hover:bg-muted/50 transition-colors">
-                  <div className="flex justify-between items-center mb-2 opacity-70">
-                    <span className="font-bold">Index: {chunk.chunk_index}</span>
-                    <span className="font-mono bg-background px-1 rounded border text-[10px]">{chunk.book_id.slice(0,8)}...</span>
-                  </div>
-                  <p className="line-clamp-4 leading-relaxed">{chunk.content}</p>
-                </div>
-              ))}
+      {mode === "search" ? (
+        <div className="w-full max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex flex-col gap-4 w-full max-w-2xl mx-auto mt-4">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder={selectedBookId ? "Search in this book..." : "Search in all books..."}
+                className="flex h-11 w-full rounded-xl border border-input bg-background px-4 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              />
+              <Button onClick={handleSearch} className="rounded-xl h-11 px-6">
+                Search
+              </Button>
+              <Button variant="secondary" onClick={handleGenerate} disabled={isGenerating || searchResults.length === 0} className="rounded-xl h-11 px-6">
+                {isGenerating ? "Processing..." : "Ask AI"}
+              </Button>
             </div>
-          ) : (
-             <p className="text-sm text-muted-foreground italic text-center py-20 border rounded-lg">Click "View Chunks" to see database contents.</p>
-          )}
-        </section>
-      </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="flex flex-col gap-6">
+              <section className="flex flex-col gap-4">
+                <h2 className="text-xl font-semibold border-b pb-2 flex justify-between items-center text-primary">
+                  AI Perspective 
+                </h2>
+                {aiResponse ? (
+                  <div className="p-6 rounded-2xl bg-primary/[0.03] border border-primary/10 text-sm leading-relaxed shadow-sm prose prose-sm dark:prose-invert max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {aiResponse}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="h-32 flex items-center justify-center border border-dashed rounded-2xl text-muted-foreground text-sm italic bg-muted/20">
+                    {isGenerating ? "Synthesizing answer..." : "Search and click 'Ask AI' to generate a response."}
+                  </div>
+                )}
+              </section>
+
+              <section className="flex flex-col gap-4">
+                <h2 className="text-xl font-semibold border-b pb-2">Context Foundations</h2>
+                {searchResults.length > 0 ? (
+                  <div className="flex flex-col gap-3">
+                    {searchResults.map((res, i) => (
+                      <div key={i} className="p-4 rounded-xl bg-card border text-sm shadow-sm hover:shadow-md transition-all hover:border-primary/20">
+                         <p className="text-card-foreground italic">"{res}"</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground italic text-center py-10 border rounded-xl bg-muted/10">No context retrieved yet.</p>
+                )}
+              </section>
+            </div>
+
+            <section className="flex flex-col gap-4">
+              <h2 className="text-xl font-semibold border-b pb-2 flex justify-between items-center">
+                Knowledge Grains
+                <span className="text-xs font-normal text-muted-foreground">{chunks.length} segments</span>
+              </h2>
+              {chunks.length > 0 ? (
+                <div className="flex flex-col gap-3 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
+                  {chunks.map((chunk) => (
+                    <div key={chunk.id} className="p-4 rounded-xl bg-muted/20 border text-xs hover:bg-muted/40 transition-colors">
+                      <div className="flex justify-between items-center mb-2 opacity-70">
+                        <span className="font-bold">Segment {chunk.chunk_index}</span>
+                        <span className="font-mono bg-background px-1.5 py-0.5 rounded border text-[10px]">{chunk.book_id.slice(0,8)}</span>
+                      </div>
+                      <p className="line-clamp-4 leading-relaxed text-muted-foreground">{chunk.content}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 border rounded-2xl bg-muted/10 gap-2">
+                  <p className="text-sm text-muted-foreground italic text-center">Click "View Chunks" to inspect database.</p>
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      ) : (
+        <div className="w-full max-w-6xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex flex-col items-center gap-6 mt-4">
+            {!learningPath && !isGenerating && (
+              <div className="text-center space-y-4 py-20 px-10 border border-dashed rounded-3xl bg-muted/5 max-w-2xl">
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 2.5-2.5Z"/><path d="M8 7h6"/><path d="M8 11h8"/><path d="M8 15h6"/></svg>
+                </div>
+                <h3 className="text-2xl font-bold">Start Your Learning Journey</h3>
+                <p className="text-muted-foreground">Select a book and let the AI create a personalized learning path with key concepts and structured lessons.</p>
+                <Button onClick={handleGenerateLearningPath} size="lg" className="rounded-xl px-8 mt-4" disabled={!selectedBookId}>
+                  Generate Learning Path
+                </Button>
+              </div>
+            )}
+
+            {isGenerating && !learningPath && (
+              <div className="flex flex-col items-center gap-4 py-20">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                <p className="text-muted-foreground animate-pulse">Designing your curriculum...</p>
+              </div>
+            )}
+
+            {learningPath && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 w-full">
+                <div className="lg:col-span-1 space-y-6">
+                  <section className="flex flex-col gap-4">
+                    <h2 className="text-xl font-semibold border-b pb-2 flex justify-between items-center text-primary">
+                      Curriculum
+                    </h2>
+                    <div className="p-6 rounded-2xl bg-card border shadow-sm prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {learningPath}
+                      </ReactMarkdown>
+                    </div>
+                  </section>
+                  
+                  <div className="flex flex-col gap-4">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">Study specific concept</h3>
+                    <div className="flex gap-2">
+                       <input 
+                         type="text" 
+                         placeholder="Enter concept name..."
+                         className="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm"
+                         value={selectedConcept}
+                         onChange={(e) => setSelectedConcept(e.target.value)}
+                         onKeyDown={(e) => e.key === 'Enter' && handleGetLesson(selectedConcept)}
+                       />
+                       <Button onClick={() => handleGetLesson(selectedConcept)} disabled={isGenerating || !selectedConcept}>
+                         Get Lesson
+                       </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-2">
+                  <section className="flex flex-col gap-4 h-full">
+                    <h2 className="text-xl font-semibold border-b pb-2 text-primary">
+                      Current Lesson {selectedConcept && `: ${selectedConcept}`}
+                    </h2>
+                    {lesson ? (
+                      <div className="p-8 rounded-3xl bg-primary/[0.02] border border-primary/10 text-base leading-relaxed shadow-sm prose prose-neutral dark:prose-invert max-w-none min-h-[400px]">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {lesson}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <div className="flex-1 flex flex-col items-center justify-center border border-dashed rounded-3xl text-muted-foreground text-sm italic bg-muted/5 min-h-[400px] p-10 text-center">
+                        {isGenerating ? (
+                           <div className="flex flex-col items-center gap-4">
+                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                             <p>Preparing lesson material...</p>
+                           </div>
+                        ) : "Select a concept from the path or type one above to begin a lesson."}
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

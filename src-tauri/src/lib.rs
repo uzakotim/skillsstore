@@ -197,6 +197,152 @@ async fn generate_response(
 
 
 #[tauri::command]
+async fn generate_learning_path(
+    book_id: String,
+    pool: tauri::State<'_, SqlitePool>
+) -> Result<String, String> {
+    // Check if learning path already exists
+    let existing = sqlx::query_as::<_, (String,)>("SELECT content FROM learning_paths WHERE book_id = ?")
+        .bind(&book_id)
+        .fetch_optional(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(path) = existing {
+        return Ok(path.0);
+    }
+
+    // Get the first 30 chunks as a proxy for the book's structure and main topics
+    let chunks = sqlx::query_as::<_, (String,)>("SELECT content FROM chunks WHERE book_id = ? ORDER BY chunk_index LIMIT 30")
+        .bind(&book_id)
+        .fetch_all(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let context = chunks.into_iter().map(|c| c.0).collect::<Vec<_>>().join("\n\n");
+
+    let prompt = format!(
+        "You are an expert educator. Based on the following excerpts from a book, \
+        identify the 5-7 most important core concepts that a student should learn to master the subject of this book. \
+        Create a logical learning path. \
+        Be as a teacher for this student. \
+        Format the output as a Markdown list where each item is a concept with a brief 1-sentence description.\n\n\
+        Excerpts:\n{}\n\nLearning Path:",
+        context
+    );
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post("http://localhost:11434/api/generate")
+        .json(&OllamaGenerateRequest {
+            model: "gemma2:2b".to_string(),
+            prompt,
+            stream: false,
+        })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let body: OllamaGenerateResponse = res.json().await.map_err(|e| e.to_string())?;
+    let generated_content = body.response;
+
+    // Store in DB
+    sqlx::query("INSERT INTO learning_paths (book_id, content) VALUES (?, ?)")
+        .bind(&book_id)
+        .bind(&generated_content)
+        .execute(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(generated_content)
+}
+
+#[tauri::command]
+async fn generate_lesson(
+    concept: String,
+    book_id: String,
+    pool: tauri::State<'_, SqlitePool>
+) -> Result<String, String> {
+    // Check if lesson already exists
+    let existing = sqlx::query_as::<_, (String,)>("SELECT content FROM lessons WHERE book_id = ? AND concept = ?")
+        .bind(&book_id)
+        .bind(&concept)
+        .fetch_optional(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(lesson) = existing {
+        return Ok(lesson.0);
+    }
+
+    // Search for context about this specific concept
+    let context_results = search_context(concept.clone(), Some(book_id.clone()), pool.clone()).await?;
+    let context = context_results.join("\n\n");
+
+    let prompt = format!(
+        "You are an expert tutor. Using the provided context from the book, \
+        explain the concept of '{}' in detail. \
+        Provide a structured lesson with clear explanations and examples based on the text.\n\n\
+        Context:\n{}\n\nLesson on {}:",
+        concept, context, concept
+    );
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post("http://localhost:11434/api/generate")
+        .json(&OllamaGenerateRequest {
+            model: "gemma2:2b".to_string(),
+            prompt,
+            stream: false,
+        })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let body: OllamaGenerateResponse = res.json().await.map_err(|e| e.to_string())?;
+    let generated_content = body.response;
+
+    // Store in DB
+    sqlx::query("INSERT INTO lessons (book_id, concept, content) VALUES (?, ?, ?)")
+        .bind(&book_id)
+        .bind(&concept)
+        .bind(&generated_content)
+        .execute(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(generated_content)
+}
+
+#[tauri::command]
+async fn get_stored_learning_path(
+    book_id: String,
+    pool: tauri::State<'_, SqlitePool>
+) -> Result<Option<String>, String> {
+    let row = sqlx::query_as::<_, (String,)>("SELECT content FROM learning_paths WHERE book_id = ?")
+        .bind(&book_id)
+        .fetch_optional(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(row.map(|r| r.0))
+}
+
+#[tauri::command]
+async fn get_stored_lessons(
+    book_id: String,
+    pool: tauri::State<'_, SqlitePool>
+) -> Result<Vec<(String, String)>, String> {
+    let rows = sqlx::query_as::<_, (String, String)>("SELECT concept, content FROM lessons WHERE book_id = ?")
+        .bind(&book_id)
+        .fetch_all(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows)
+}
+
+#[tauri::command]
 async fn get_chunks(
     book_id: Option<String>,
     pool: tauri::State<'_, SqlitePool>
@@ -249,7 +395,19 @@ pub fn run() {
         .manage(pool)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context, get_chunks, get_books, delete_book, generate_response])
+        .invoke_handler(tauri::generate_handler![
+            greet, 
+            upload_pdf, 
+            search_context, 
+            get_chunks, 
+            get_books, 
+            delete_book, 
+            generate_response,
+            generate_learning_path,
+            generate_lesson,
+            get_stored_learning_path,
+            get_stored_lessons
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
