@@ -2,7 +2,16 @@ mod db;
 mod rag;
 use rag::embedder::embed;
 use rag::faiss::VectorIndex;
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, FromRow};
+use serde::Serialize;
+
+#[derive(Serialize, FromRow)]
+struct Chunk {
+    id: i32,
+    book_id: String,
+    chunk_index: i32,
+    content: String,
+}
 
 
 fn load_or_create_faiss() -> VectorIndex {
@@ -119,6 +128,14 @@ async fn search_context(
     Ok(results)
 }
 
+#[tauri::command]
+async fn get_chunks(pool: tauri::State<'_, SqlitePool>) -> Result<Vec<Chunk>, String> {
+    sqlx::query_as::<_, Chunk>("SELECT id, book_id, chunk_index, content FROM chunks")
+        .fetch_all(pool.inner())
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pool = tauri::async_runtime::block_on(db::init_db());
@@ -127,7 +144,7 @@ pub fn run() {
         .manage(pool)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context])
+        .invoke_handler(tauri::generate_handler![greet, upload_pdf, search_context, get_chunks])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
