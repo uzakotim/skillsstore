@@ -1,1 +1,5 @@
 # This file is intentionally left empty to allow build.rs to handle platform-specific linking.
+[env]
+OpenMP_ROOT = "/opt/homebrew/opt/libomp"
+LDFLAGS = "-L/opt/homebrew/opt/libomp/lib"
+CPPFLAGS = "-I/opt/homebrew/opt/libomp/include"
