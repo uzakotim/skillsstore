@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Button } from "@/components/ui/button";
 
 async function uploadBook() {
   const selected = await open({
@@ -14,5 +15,5 @@ async function uploadBook() {
 }
 
 export default function UploadButton() {
-  return <button onClick={uploadBook} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">Upload PDF</button>;
+  return <Button onClick={uploadBook}>Upload PDF</Button>;
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
-import UploadButton from "./components/UploadButton";
+import UploadButton from "./components/custom/UploadButton";
 
 function App() {
   const [greetMsg, setGreetMsg] = useState("HOLA");
