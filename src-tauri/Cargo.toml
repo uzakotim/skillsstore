@@ -23,4 +23,11 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2"
-
+pdf-extract = "0.7"
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+dirs = "5"
+faiss = { version = "0.13.0", features = ["static"] }
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-rustls", "macros"] }
