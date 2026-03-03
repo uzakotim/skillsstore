@@ -19,7 +19,7 @@ export default function UploadButton({ onUpload }: UploadButtonProps) {
       });
 
       if (!selected) return;
-
+      setConsoleMsg("Uploading book...");
       await invoke("upload_pdf", { path: selected });
       setConsoleMsg("Book uploaded and indexed!");
       if (onUpload) onUpload();
