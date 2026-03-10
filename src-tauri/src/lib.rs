@@ -295,6 +295,8 @@ async fn generate_lesson(
         "You are an expert tutor. Using the provided context from the book, \
         explain the concept of '{}' in detail. \
         Provide a structured lesson with clear explanations and examples based on the text.\n\n\
+        If you don't know the answer based on the context, just say that you don't know, \
+        don't try to make up an answer. Keep the answer concise and relevant.\n\n\
         Context:\n{}\n\nLesson on {}:",
         concept, context, concept
     );
