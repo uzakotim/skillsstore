@@ -78,7 +78,7 @@ function App() {
   const handleDeleteBook = async () => {
     if (!selectedBookId) return;
     
-    const confirmDelete = window.confirm("Are you sure you want to delete this book and all its chunks? This action cannot be undone.");
+    const confirmDelete = await window.confirm("Are you sure you want to delete this book and all its chunks? This action cannot be undone.");
     if (!confirmDelete) return;
 
     try {
