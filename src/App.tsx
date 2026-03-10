@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Loader2Icon } from "lucide-react";
 
 interface Chunk {
   id: number;
@@ -147,13 +148,13 @@ function App() {
       return;
     }
     setIsGenerating(true);
-    setConsoleMsg("Generating learning path...");
+    setConsoleMsg("Finding concepts from the book...");
     try {
       const path = await invoke<string>("generate_learning_path", { 
         bookId: selectedBookId 
       });
       setLearningPath(path);
-      setConsoleMsg("Learning path generated!");
+      setConsoleMsg("Concepts found!");
     } catch (error) {
       setConsoleMsg(`Error: ${error}`);
     } finally {
@@ -165,7 +166,7 @@ function App() {
     if (!selectedBookId) return;
     setSelectedConcept(concept);
     setIsGenerating(true);
-    setConsoleMsg(`Generating lesson for ${concept}...`);
+    setConsoleMsg(`Generating a lesson for ${concept}...`);
     try {
       const result = await invoke<string>("generate_lesson", { 
         concept, 
@@ -339,17 +340,17 @@ function App() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 2.5-2.5Z"/><path d="M8 7h6"/><path d="M8 11h8"/><path d="M8 15h6"/></svg>
                 </div>
                 <h3 className="text-2xl font-bold">Start Your Learning Journey</h3>
-                <p className="text-muted-foreground">Select a book and let the AI create a personalized learning path with key concepts and structured lessons.</p>
+                <p className="text-muted-foreground">Select a book and let the AI create a personalized list of key concepts and structured lessons.</p>
                 <Button onClick={handleGenerateLearningPath} size="lg" className="rounded-xl px-8 mt-4" disabled={!selectedBookId}>
-                  Generate Learning Path
+                  Find Concepts
                 </Button>
               </div>
             )}
 
             {isGenerating && !learningPath && (
               <div className="flex flex-col items-center gap-4 py-20">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-                <p className="text-muted-foreground animate-pulse">Designing your curriculum...</p>
+                <Loader2Icon className="w-16 h-16 text-primary animate-spin" />
+                <p className="text-muted-foreground animate-pulse">Finding concepts...</p>
               </div>
             )}
 
@@ -358,7 +359,7 @@ function App() {
                 <div className="lg:col-span-1 space-y-6">
                   <section className="flex flex-col gap-4">
                     <h2 className="text-xl font-semibold border-b pb-2 flex justify-between items-center text-primary">
-                      Curriculum
+                      Concepts
                     </h2>
                     <div className="p-6 rounded-2xl bg-card border shadow-sm prose prose-sm dark:prose-invert max-w-none">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -400,7 +401,7 @@ function App() {
                       <div className="flex-1 flex flex-col items-center justify-center border border-dashed rounded-3xl text-muted-foreground text-sm italic bg-muted/5 min-h-[400px] p-10 text-center">
                         {isGenerating ? (
                            <div className="flex flex-col items-center gap-4">
-                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                             <Loader2Icon className="w-8 h-8 text-primary animate-spin" />
                              <p>Preparing lesson material...</p>
                            </div>
                         ) : "Select a concept from the path or type one above to begin a lesson."}

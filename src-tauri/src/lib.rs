@@ -221,7 +221,7 @@ async fn generate_learning_path(
     }
 
     // Get the first 30 chunks as a proxy for the book's structure and main topics
-    let chunks = sqlx::query_as::<_, (String,)>("SELECT content FROM chunks WHERE book_id = ? ORDER BY chunk_index LIMIT 30")
+    let chunks = sqlx::query_as::<_, (String,)>("SELECT content FROM chunks WHERE book_id = ? ORDER BY chunk_index")
         .bind(&book_id)
         .fetch_all(pool.inner())
         .await
@@ -230,12 +230,15 @@ async fn generate_learning_path(
     let context = chunks.into_iter().map(|c| c.0).collect::<Vec<_>>().join("\n\n");
 
     let prompt = format!(
-        "You are an expert educator. Based on the following excerpts from a book, \
-        identify the 5-7 most important core concepts that a student should learn to master the subject of this book. \
-        Create a logical learning path. \
-        Be as a teacher for this student. \
-        Format the output as a Markdown list where each item is a concept with a brief 1-sentence description.\n\n\
-        Excerpts:\n{}\n\nLearning Path:",
+        "You are an expert concepts finder.\n\n \
+        Based on the context, \
+        CONTEXT:\n{}\n\n
+
+        RULES: \
+        - Identify the most important valuable concepts, principles and ideas of the book. \n\
+        - Be as a teacher for this student. \n\
+        - Format the output as a Markdown list. \n\
+        CONCEPTS:\n",
         context
     );
 
