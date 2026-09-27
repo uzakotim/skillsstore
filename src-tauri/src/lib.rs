@@ -1,9 +1,10 @@
 mod db;
 mod rag;
-use rag::embedder::embed;
+// rag::embedder::embed is superseded by embed_with_model below
 use rag::faiss::VectorIndex;
-use sqlx::{SqlitePool, FromRow};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, SqlitePool};
+use tauri::Emitter;
 use tauri::Manager;
 
 #[derive(Serialize, FromRow)]
@@ -19,7 +20,6 @@ struct Book {
     id: String,
     title: String,
 }
-
 
 struct AppStorage {
     dir: std::path::PathBuf,
@@ -48,17 +48,266 @@ pub fn chunk_with_overlap(text: &str, size: usize, overlap: usize) -> Vec<String
     chunks
 }
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+// ─── Ollama API Types ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct OllamaListResponse {
+    models: Vec<OllamaModelInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct OllamaModelInfo {
+    name: String,
+    size: Option<u64>,
+    digest: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct OllamaTag {
+    name: String,
+    description: Option<String>,
+    #[serde(rename = "pulls")]
+    pulls: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct OllamaPullRequest {
+    name: String,
+    stream: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ModelConfig {
+    llm_model: String,
+    embed_model: String,
+}
+
+#[derive(Deserialize)]
+struct OllamaPullProgress {
+    status: String,
+    completed: Option<u64>,
+    total: Option<u64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct PullProgress {
+    status: String,
+    completed: Option<u64>,
+    total: Option<u64>,
+    percent: Option<f64>,
+}
+
+// ─── Model Config Storage (in-memory + persisted to a simple JSON file) ────────
+
+use std::sync::Mutex;
+
+pub struct ModelConfigState {
+    pub config: Mutex<ModelConfig>,
+    pub config_path: std::path::PathBuf,
+}
+
+impl ModelConfigState {
+    pub fn load(storage_dir: &std::path::Path) -> Self {
+        let path = storage_dir.join("model_config.json");
+
+        let config = if path.exists() {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
+                    eprintln!(
+                        "Failed to parse model_config.json at {:?}: {}, falling back to defaults",
+                        path, e
+                    );
+                    ModelConfig {
+                        llm_model: "gemma2:2b".to_string(),
+                        embed_model: "nomic-embed-text".to_string(),
+                    }
+                }),
+                Err(e) => {
+                    eprintln!("Failed to read model_config.json at {:?}: {}", path, e);
+                    ModelConfig {
+                        llm_model: "gemma2:2b".to_string(),
+                        embed_model: "nomic-embed-text".to_string(),
+                    }
+                }
+            }
+        } else {
+            let default_cfg = ModelConfig {
+                llm_model: "gemma2:2b".to_string(),
+                embed_model: "nomic-embed-text".to_string(),
+            };
+            // Persist the default configuration immediately so the file exists
+            if let Ok(json) = serde_json::to_string_pretty(&default_cfg) {
+                let _ = std::fs::write(&path, json);
+            }
+            default_cfg
+        };
+
+        Self {
+            config: Mutex::new(config),
+            config_path: path,
+        }
+    }
+
+    pub fn save(&self) {
+        if let Ok(config) = self.config.lock() {
+            if let Ok(json) = serde_json::to_string_pretty(&*config) {
+                if let Err(e) = std::fs::write(&self.config_path, json) {
+                    eprintln!(
+                        "Failed to write model_config.json to {:?}: {}",
+                        self.config_path, e
+                    );
+                }
+            }
+        }
+    }
+}
+// ─── Ollama Tauri Commands ────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn list_local_models() -> Result<Vec<OllamaModelInfo>, String> {
+    let client = reqwest::Client::new();
+    let res = client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .map_err(|e| format!("Cannot connect to Ollama: {}", e))?;
+
+    let body: OllamaListResponse = res.json().await.map_err(|e| e.to_string())?;
+    Ok(body.models)
+}
+
+#[tauri::command]
+async fn delete_ollama_model(name: String) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({ "name": name });
+    let res = client
+        .delete("http://localhost:11434/api/delete")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if res.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to delete model: {}", res.status()))
+    }
+}
+
+#[tauri::command]
+async fn pull_model(name: String, app: tauri::AppHandle) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .map_err(|e| format!("Ollama not reachable: {}", e))?;
+
+    tauri::async_runtime::spawn(async move {
+        let download_result = async {
+            let req_body = OllamaPullRequest {
+                name: name.clone(),
+                stream: true,
+            };
+
+            let client = reqwest::Client::new();
+            let res = client
+                .post("http://localhost:11434/api/pull")
+                .json(&req_body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            use futures_util::StreamExt;
+            let mut byte_stream = res.bytes_stream();
+            let mut buffer = String::new();
+
+            while let Some(chunk) = byte_stream.next().await {
+                let chunk = chunk.map_err(|e| e.to_string())?;
+                buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+                // Process complete lines ending in \n
+                while let Some(newline_idx) = buffer.find('\n') {
+                    let line = buffer[..newline_idx].trim().to_string();
+                    buffer.drain(..=newline_idx);
+
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    if let Ok(progress) = serde_json::from_str::<OllamaPullProgress>(&line) {
+                        let percent = match (progress.completed, progress.total) {
+                            (Some(c), Some(t)) if t > 0 => Some((c as f64 / t as f64) * 100.0),
+                            _ => None,
+                        };
+                        let payload = PullProgress {
+                            status: progress.status,
+                            completed: progress.completed,
+                            total: progress.total,
+                            percent,
+                        };
+                        let _ = app.emit("model-pull-progress", &payload);
+                    }
+                }
+            }
+            Ok::<_, String>(())
+        }
+        .await;
+
+        match download_result {
+            Ok(_) => {
+                let _ = app.emit("model-pull-complete", &name);
+            }
+            Err(e) => {
+                let _ = app.emit("model-pull-error", &e);
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_model_config(
+    state: tauri::State<'_, ModelConfigState>,
+) -> Result<ModelConfig, String> {
+    let config = state.config.lock().unwrap();
+    Ok(ModelConfig {
+        llm_model: config.llm_model.clone(),
+        embed_model: config.embed_model.clone(),
+    })
+}
+
+#[tauri::command]
+async fn set_model_config(
+    llm_model: String,
+    embed_model: String,
+    state: tauri::State<'_, ModelConfigState>,
+) -> Result<(), String> {
+    {
+        let mut config = state.config.lock().unwrap();
+        config.llm_model = llm_model;
+        config.embed_model = embed_model;
+    }
+    state.save();
+    Ok(())
+}
+
+// ─── Greet ────────────────────────────────────────────────────────────────────
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+// ─── Upload ───────────────────────────────────────────────────────────────────
+
 #[tauri::command]
 async fn upload_pdf(
-    path: String, 
+    path: String,
     pool: tauri::State<'_, SqlitePool>,
-    storage: tauri::State<'_, AppStorage>
+    storage: tauri::State<'_, AppStorage>,
+    model_config: tauri::State<'_, ModelConfigState>,
 ) -> Result<(), String> {
     let book_id = uuid::Uuid::new_v4().to_string();
     let title = std::path::Path::new(&path)
@@ -67,34 +316,38 @@ async fn upload_pdf(
         .to_string_lossy()
         .to_string();
 
-    // Save book row
-    sqlx::query(
-        "INSERT INTO books (id, title, file_path) VALUES (?, ?, ?)"
-    )
-    .bind(book_id.clone())
-    .bind(title)
-    .bind(path.clone())
-    .execute(pool.inner())
-    .await
-    .map_err(|e| e.to_string())?;
-
-
-    let text = pdf_extract::extract_text(&path)
+    sqlx::query("INSERT INTO books (id, title, file_path) VALUES (?, ?, ?)")
+        .bind(book_id.clone())
+        .bind(title)
+        .bind(path.clone())
+        .execute(pool.inner())
+        .await
         .map_err(|e| e.to_string())?;
 
+    let text = pdf_extract::extract_text(&path).map_err(|e| e.to_string())?;
+
+    if text.trim().is_empty() {
+        return Err("No text extracted. PDF might be scanned/image-only.".into());
+    }
+
     let chunks = chunk_with_overlap(&text, 250, 50);
+
+    let embed_model = {
+        let cfg = model_config.config.lock().unwrap();
+        cfg.embed_model.clone()
+    };
 
     let mut index = load_or_create_faiss(&storage.dir);
     let mut current_faiss_id = index.ntotal() as i64;
 
     for (i, chunk) in chunks.iter().enumerate() {
-        let embedding = embed(chunk).await?;
+        let embedding = embed_with_model(chunk, &embed_model).await?;
 
         index.add(&embedding);
 
         sqlx::query(
             "INSERT INTO chunks (book_id, chunk_index, content, faiss_id)
-             VALUES (?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?)",
         )
         .bind(book_id.clone())
         .bind(i as i32)
@@ -104,23 +357,54 @@ async fn upload_pdf(
         .await
         .map_err(|e| e.to_string())?;
 
-
         current_faiss_id += 1;
     }
 
     index.save(storage.dir.join("faiss.index").to_str().unwrap());
-
     Ok(())
 }
+
+// ─── Search ───────────────────────────────────────────────────────────────────
+
+async fn embed_with_model(text: &str, model: &str) -> Result<Vec<f32>, String> {
+    #[derive(serde::Serialize)]
+    struct EmbedReq<'a> {
+        model: &'a str,
+        prompt: &'a str,
+    }
+    #[derive(serde::Deserialize)]
+    struct EmbedResp {
+        embedding: Vec<f32>,
+    }
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post("http://localhost:11434/api/embeddings")
+        .json(&EmbedReq {
+            model,
+            prompt: text,
+        })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let body: EmbedResp = res.json().await.map_err(|e| e.to_string())?;
+    Ok(body.embedding)
+}
+
 #[tauri::command]
 async fn search_context(
     query: String,
     book_id: Option<String>,
     pool: tauri::State<'_, SqlitePool>,
-    storage: tauri::State<'_, AppStorage>
+    storage: tauri::State<'_, AppStorage>,
+    model_config: tauri::State<'_, ModelConfigState>,
 ) -> Result<Vec<String>, String> {
+    let embed_model = {
+        let cfg = model_config.config.lock().unwrap();
+        cfg.embed_model.clone()
+    };
 
-    let query_embedding = embed(&query).await?;
+    let query_embedding = embed_with_model(&query, &embed_model).await?;
     let mut index = load_or_create_faiss(&storage.dir);
     let ids = index.search(&query_embedding, 5);
 
@@ -133,36 +417,51 @@ async fn search_context(
             "SELECT content FROM chunks WHERE faiss_id = ?"
         };
 
-        let mut query = sqlx::query_as::<_, (String,)>(query_str)
-            .bind(id as i64);
-
+        let mut q = sqlx::query_as::<_, (String,)>(query_str).bind(id as i64);
         if let Some(ref bid) = book_id {
-            query = query.bind(bid);
+            q = q.bind(bid);
         }
 
-        let row = query.fetch_optional(pool.inner())
+        let row = q
+            .fetch_optional(pool.inner())
             .await
             .map_err(|e| e.to_string())?;
-
         if let Some(r) = row {
             results.push(r.0);
         }
     }
 
-
     Ok(results)
 }
 
-#[derive(serde::Deserialize)]
+// ─── AI Generation ────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
 struct OllamaGenerateResponse {
     response: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct OllamaGenerateRequest {
     model: String,
     prompt: String,
     stream: bool,
+}
+
+async fn call_ollama(model: &str, prompt: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let res = client
+        .post("http://localhost:11434/api/generate")
+        .json(&OllamaGenerateRequest {
+            model: model.to_string(),
+            prompt,
+            stream: false,
+        })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let body: OllamaGenerateResponse = res.json().await.map_err(|e| e.to_string())?;
+    Ok(body.response)
 }
 
 #[tauri::command]
@@ -170,13 +469,18 @@ async fn generate_response(
     query: String,
     book_id: Option<String>,
     pool: tauri::State<'_, SqlitePool>,
-    storage: tauri::State<'_, AppStorage>
+    storage: tauri::State<'_, AppStorage>,
+    model_config: tauri::State<'_, ModelConfigState>,
 ) -> Result<String, String> {
-    // 1. Get context through search
-    let context_results = search_context(query.clone(), book_id, pool, storage).await?;
+    let llm_model = {
+        let cfg = model_config.config.lock().unwrap();
+        cfg.llm_model.clone()
+    };
+
+    let context_results =
+        search_context(query.clone(), book_id, pool, storage, model_config).await?;
     let context = context_results.join("\n\n");
 
-    // 2. Build prompt
     let prompt = format!(
         "Use the following pieces of retrieved context to answer the user's question. \
         If you don't know the answer based on the context, just say that you don't know, \
@@ -185,55 +489,49 @@ async fn generate_response(
         context, query
     );
 
-    // 3. Call Ollama gemma2:2b
-    let client = reqwest::Client::new();
-    let res = client
-        .post("http://localhost:11434/api/generate")
-        .json(&OllamaGenerateRequest {
-            model: "gemma2:2b".to_string(),
-            prompt,
-            stream: false,
-        })
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let body: OllamaGenerateResponse = res.json().await.map_err(|e| e.to_string())?;
-
-    Ok(body.response)
+    call_ollama(&llm_model, prompt).await
 }
-
 
 #[tauri::command]
 async fn generate_learning_path(
     book_id: String,
-    pool: tauri::State<'_, SqlitePool>
+    pool: tauri::State<'_, SqlitePool>,
+    model_config: tauri::State<'_, ModelConfigState>,
 ) -> Result<String, String> {
-    // Check if learning path already exists
-    let existing = sqlx::query_as::<_, (String,)>("SELECT content FROM learning_paths WHERE book_id = ?")
-        .bind(&book_id)
-        .fetch_optional(pool.inner())
-        .await
-        .map_err(|e| e.to_string())?;
+    let existing =
+        sqlx::query_as::<_, (String,)>("SELECT content FROM learning_paths WHERE book_id = ?")
+            .bind(&book_id)
+            .fetch_optional(pool.inner())
+            .await
+            .map_err(|e| e.to_string())?;
 
     if let Some(path) = existing {
         return Ok(path.0);
     }
 
-    // Get the first 30 chunks as a proxy for the book's structure and main topics
-    let chunks = sqlx::query_as::<_, (String,)>("SELECT content FROM chunks WHERE book_id = ? ORDER BY chunk_index")
-        .bind(&book_id)
-        .fetch_all(pool.inner())
-        .await
-        .map_err(|e| e.to_string())?;
+    let llm_model = {
+        let cfg = model_config.config.lock().unwrap();
+        cfg.llm_model.clone()
+    };
 
-    let context = chunks.into_iter().map(|c| c.0).collect::<Vec<_>>().join("\n\n");
+    let chunks = sqlx::query_as::<_, (String,)>(
+        "SELECT content FROM chunks WHERE book_id = ? ORDER BY chunk_index",
+    )
+    .bind(&book_id)
+    .fetch_all(pool.inner())
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let context = chunks
+        .into_iter()
+        .map(|c| c.0)
+        .collect::<Vec<_>>()
+        .join("\n\n");
 
     let prompt = format!(
         "You are an expert concepts finder.\n\n \
         Based on the context, \
-        CONTEXT:\n{}\n\n
-
+        CONTEXT:\n{}\n\n\n\
         RULES: \
         - Identify the most important valuable concepts, principles and ideas of the book. \n\
         - Be as a teacher for this student. \n\
@@ -242,22 +540,8 @@ async fn generate_learning_path(
         context
     );
 
-    let client = reqwest::Client::new();
-    let res = client
-        .post("http://localhost:11434/api/generate")
-        .json(&OllamaGenerateRequest {
-            model: "gemma2:2b".to_string(),
-            prompt,
-            stream: false,
-        })
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let generated_content = call_ollama(&llm_model, prompt).await?;
 
-    let body: OllamaGenerateResponse = res.json().await.map_err(|e| e.to_string())?;
-    let generated_content = body.response;
-
-    // Store in DB
     sqlx::query("INSERT INTO learning_paths (book_id, content) VALUES (?, ?)")
         .bind(&book_id)
         .bind(&generated_content)
@@ -273,22 +557,35 @@ async fn generate_lesson(
     concept: String,
     book_id: String,
     pool: tauri::State<'_, SqlitePool>,
-    storage: tauri::State<'_, AppStorage>
+    storage: tauri::State<'_, AppStorage>,
+    model_config: tauri::State<'_, ModelConfigState>,
 ) -> Result<String, String> {
-    // Check if lesson already exists
-    let existing = sqlx::query_as::<_, (String,)>("SELECT content FROM lessons WHERE book_id = ? AND concept = ?")
-        .bind(&book_id)
-        .bind(&concept)
-        .fetch_optional(pool.inner())
-        .await
-        .map_err(|e| e.to_string())?;
+    let existing = sqlx::query_as::<_, (String,)>(
+        "SELECT content FROM lessons WHERE book_id = ? AND concept = ?",
+    )
+    .bind(&book_id)
+    .bind(&concept)
+    .fetch_optional(pool.inner())
+    .await
+    .map_err(|e| e.to_string())?;
 
     if let Some(lesson) = existing {
         return Ok(lesson.0);
     }
 
-    // Search for context about this specific concept
-    let context_results = search_context(concept.clone(), Some(book_id.clone()), pool.clone(), storage).await?;
+    let llm_model = {
+        let cfg = model_config.config.lock().unwrap();
+        cfg.llm_model.clone()
+    };
+
+    let context_results = search_context(
+        concept.clone(),
+        Some(book_id.clone()),
+        pool.clone(),
+        storage,
+        model_config,
+    )
+    .await?;
     let context = context_results.join("\n\n");
 
     let prompt = format!(
@@ -301,22 +598,8 @@ async fn generate_lesson(
         concept, context, concept
     );
 
-    let client = reqwest::Client::new();
-    let res = client
-        .post("http://localhost:11434/api/generate")
-        .json(&OllamaGenerateRequest {
-            model: "gemma2:2b".to_string(),
-            prompt,
-            stream: false,
-        })
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let generated_content = call_ollama(&llm_model, prompt).await?;
 
-    let body: OllamaGenerateResponse = res.json().await.map_err(|e| e.to_string())?;
-    let generated_content = body.response;
-
-    // Store in DB
     sqlx::query("INSERT INTO lessons (book_id, concept, content) VALUES (?, ?, ?)")
         .bind(&book_id)
         .bind(&concept)
@@ -328,45 +611,50 @@ async fn generate_lesson(
     Ok(generated_content)
 }
 
+// ─── Data Access ──────────────────────────────────────────────────────────────
+
 #[tauri::command]
 async fn get_stored_learning_path(
     book_id: String,
-    pool: tauri::State<'_, SqlitePool>
+    pool: tauri::State<'_, SqlitePool>,
 ) -> Result<Option<String>, String> {
-    let row = sqlx::query_as::<_, (String,)>("SELECT content FROM learning_paths WHERE book_id = ?")
-        .bind(&book_id)
-        .fetch_optional(pool.inner())
-        .await
-        .map_err(|e| e.to_string())?;
-
+    let row =
+        sqlx::query_as::<_, (String,)>("SELECT content FROM learning_paths WHERE book_id = ?")
+            .bind(&book_id)
+            .fetch_optional(pool.inner())
+            .await
+            .map_err(|e| e.to_string())?;
     Ok(row.map(|r| r.0))
 }
 
 #[tauri::command]
 async fn get_stored_lessons(
     book_id: String,
-    pool: tauri::State<'_, SqlitePool>
+    pool: tauri::State<'_, SqlitePool>,
 ) -> Result<Vec<(String, String)>, String> {
-    let rows = sqlx::query_as::<_, (String, String)>("SELECT concept, content FROM lessons WHERE book_id = ?")
-        .bind(&book_id)
-        .fetch_all(pool.inner())
-        .await
-        .map_err(|e| e.to_string())?;
-
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT concept, content FROM lessons WHERE book_id = ?",
+    )
+    .bind(&book_id)
+    .fetch_all(pool.inner())
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(rows)
 }
 
 #[tauri::command]
 async fn get_chunks(
     book_id: Option<String>,
-    pool: tauri::State<'_, SqlitePool>
+    pool: tauri::State<'_, SqlitePool>,
 ) -> Result<Vec<Chunk>, String> {
     if let Some(bid) = book_id {
-        sqlx::query_as::<_, Chunk>("SELECT id, book_id, chunk_index, content FROM chunks WHERE book_id = ?")
-            .bind(bid)
-            .fetch_all(pool.inner())
-            .await
-            .map_err(|e| e.to_string())
+        sqlx::query_as::<_, Chunk>(
+            "SELECT id, book_id, chunk_index, content FROM chunks WHERE book_id = ?",
+        )
+        .bind(bid)
+        .fetch_all(pool.inner())
+        .await
+        .map_err(|e| e.to_string())
     } else {
         sqlx::query_as::<_, Chunk>("SELECT id, book_id, chunk_index, content FROM chunks")
             .fetch_all(pool.inner())
@@ -385,7 +673,6 @@ async fn get_books(pool: tauri::State<'_, SqlitePool>) -> Result<Vec<Book>, Stri
 
 #[tauri::command]
 async fn delete_book(book_id: String, pool: tauri::State<'_, SqlitePool>) -> Result<(), String> {
-    // Delete chunks first due to potential foreign key or just logical grouping
     sqlx::query("DELETE FROM chunks WHERE book_id = ?")
         .bind(&book_id)
         .execute(pool.inner())
@@ -401,40 +688,59 @@ async fn delete_book(book_id: String, pool: tauri::State<'_, SqlitePool>) -> Res
     Ok(())
 }
 
+// ─── App Setup ────────────────────────────────────────────────────────────────
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let app_data_dir = app.path().app_data_dir().expect("failed to get app data dir");
+            // Resolve canonical App Data Directory
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("failed to get app data dir");
+
+            // Ensure directory exists synchronously before initializing file paths
             std::fs::create_dir_all(&app_data_dir).expect("failed to create app data dir");
-            
+
             let db_path = app_data_dir.join("app.db");
             let options = sqlx::sqlite::SqliteConnectOptions::new()
                 .filename(db_path.clone())
                 .create_if_missing(true);
-            
-            let pool = tauri::async_runtime::block_on(db::init_db(options))
-                .unwrap_or_else(|e| panic!("failed to initialize database at {:?}: {}", db_path, e));
-            
+
+            let pool = tauri::async_runtime::block_on(db::init_db(options)).unwrap_or_else(|e| {
+                panic!("failed to initialize database at {:?}: {}", db_path, e)
+            });
+
+            // Load ModelConfigState using canonical app_data_dir
+            let model_config = ModelConfigState::load(&app_data_dir);
+
             app.manage(pool);
             app.manage(AppStorage { dir: app_data_dir });
-            
+            app.manage(model_config);
+
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            greet, 
-            upload_pdf, 
-            search_context, 
-            get_chunks, 
-            get_books, 
-            delete_book, 
+            greet,
+            upload_pdf,
+            search_context,
+            get_chunks,
+            get_books,
+            delete_book,
             generate_response,
             generate_learning_path,
             generate_lesson,
             get_stored_learning_path,
-            get_stored_lessons
+            get_stored_lessons,
+            // Model management
+            list_local_models,
+            delete_ollama_model,
+            pull_model,
+            get_model_config,
+            set_model_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
