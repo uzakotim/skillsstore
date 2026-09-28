@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import "./App.css";
 import UploadButton from "@/components/custom/UploadButton";
 import BookShelf from "@/components/custom/BookShelf";
@@ -9,14 +9,13 @@ import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2Icon } from "lucide-react";
-import { confirm } from "@tauri-apps/plugin-dialog"
+import { Loader2Icon, Sparkles, BookOpen, GraduationCap, CheckCircle2, ArrowRight, RefreshCw, Copy, Check } from "lucide-react";
+import { confirm } from "@tauri-apps/plugin-dialog";
 
 interface Chunk {
   id: number;
   book_id: string;
   chunk_index: number;
-
   content: string;
 }
 
@@ -30,6 +29,12 @@ interface ModelConfig {
   embed_model: string;
 }
 
+interface ConceptItem {
+  id: string;
+  title: string;
+  description: string;
+}
+
 function App() {
   const [consoleMsg, setConsoleMsg] = useAtom(consoleMsgAtom);
   const [books, setBooks] = useState<Book[]>([]);
@@ -40,9 +45,15 @@ function App() {
   const [aiResponse, setAiResponse] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [mode, setMode] = useState<"search" | "learn">("search");
+
+  // Learn mode state
+  const [learnTab, setLearnTab] = useState<"concepts" | "lesson">("concepts");
   const [learningPath, setLearningPath] = useState("");
   const [lesson, setLesson] = useState("");
   const [selectedConcept, setSelectedConcept] = useState("");
+  const [customConcept, setCustomConcept] = useState("");
+  const [copiedLesson, setCopiedLesson] = useState(false);
+
   const [isUploading, setIsUploading] = useState(false);
   const [newBookId, setNewBookId] = useState<string | null>(null);
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
@@ -87,12 +98,49 @@ function App() {
         }
         setLesson("");
         setSelectedConcept("");
+        setLearnTab("concepts");
       } catch (error) {
         console.error("Error loading stored data:", error);
       }
     };
     loadStoredData();
   }, [selectedBookId]);
+
+  // Parse markdown content from learning path into structured concept cards
+  const parsedConcepts = useMemo<ConceptItem[]>(() => {
+    if (!learningPath) return [];
+
+    const lines = learningPath.split("\n");
+    const concepts: ConceptItem[] = [];
+    let currentTitle = "";
+    let currentDesc: string[] = [];
+
+    const saveCurrent = () => {
+      if (currentTitle) {
+        concepts.push({
+          id: currentTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+          title: currentTitle,
+          description: currentDesc.join(" ").trim() || "Master this key core concept from the selected book."
+        });
+      }
+    };
+
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      // Match headings or bullet items with titles
+      const headingMatch = trimmed.match(/^(?:#{1,4}|\d+\.|\*|-)\s+\*?\*?([^:*#]+)\*?\*?:?(.*)$/);
+      if (headingMatch && headingMatch[1].trim().length > 2) {
+        saveCurrent();
+        currentTitle = headingMatch[1].replace(/\*\*/g, "").trim();
+        currentDesc = headingMatch[2] ? [headingMatch[2].trim()] : [];
+      } else if (trimmed && currentTitle) {
+        currentDesc.push(trimmed.replace(/^[-*]\s+/, ""));
+      }
+    });
+    saveCurrent();
+
+    return concepts;
+  }, [learningPath]);
 
   const handleDeleteBook = async () => {
     if (!selectedBookId) return;
@@ -167,6 +215,7 @@ function App() {
     try {
       const path = await invoke<string>("generate_learning_path", { bookId: selectedBookId });
       setLearningPath(path);
+      setLearnTab("concepts");
       setConsoleMsg("Concepts ready!");
     } catch (error) {
       setConsoleMsg(`Error: ${error}`);
@@ -176,8 +225,9 @@ function App() {
   };
 
   const handleGetLesson = async (concept: string) => {
-    if (!selectedBookId) return;
+    if (!selectedBookId || !concept.trim()) return;
     setSelectedConcept(concept);
+    setLearnTab("lesson");
     setIsGenerating(true);
     setConsoleMsg(`Generating lesson on "${concept}"...`);
     try {
@@ -191,6 +241,13 @@ function App() {
     }
   };
 
+  const handleCopyLesson = () => {
+    if (!lesson) return;
+    navigator.clipboard.writeText(lesson);
+    setCopiedLesson(true);
+    setTimeout(() => setCopiedLesson(false), 2000);
+  };
+
   const handleUploadStart = () => {
     setIsUploading(true);
     setNewBookId(null);
@@ -198,14 +255,12 @@ function App() {
 
   const handleUploadDone = async () => {
     setIsUploading(false);
-    // Get the freshly uploaded book (last one)
     try {
       const data = await invoke<Book[]>("get_books");
       setBooks(data);
       if (data.length > 0) {
         const lastBook = data[data.length - 1];
         setNewBookId(lastBook.id);
-        // Clear the "new" glow after 3 seconds
         setTimeout(() => setNewBookId(null), 3000);
       }
     } catch { }
@@ -241,10 +296,7 @@ function App() {
             className={`nav-item ${mode === "learn" ? "active" : ""}`}
             onClick={() => setMode("learn")}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-              <path d="M6 12v5c3 3 9 3 12 0v-5" />
-            </svg>
+            <GraduationCap className="w-4 h-4" />
             Learn Mode
           </button>
         </nav>
@@ -271,7 +323,6 @@ function App() {
 
         <div className="sidebar-spacer" />
 
-        {/* Model manager button */}
         <button className="sidebar-bottom-btn" onClick={() => setModelManagerOpen(true)}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="3" />
@@ -326,7 +377,6 @@ function App() {
         <div className="content-area">
           {mode === "search" ? (
             <div className="search-mode animate-fadein">
-              {/* Search bar */}
               <div className="search-bar-row">
                 <div className="search-input-wrap">
                   <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -355,7 +405,6 @@ function App() {
               </div>
 
               <div className="search-results-grid">
-                {/* AI response */}
                 <div className="ai-response-panel">
                   <div className="panel-header">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -384,7 +433,6 @@ function App() {
                   )}
                 </div>
 
-                {/* Context chunks */}
                 <div className="context-panel">
                   <div className="panel-header">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -413,7 +461,6 @@ function App() {
                   )}
                 </div>
 
-                {/* Debug chunks panel */}
                 {showChunksPanel && chunks.length > 0 && (
                   <div className="chunks-panel">
                     <div className="panel-header">
@@ -440,14 +487,12 @@ function App() {
               </div>
             </div>
           ) : (
+            /* LEARN MODE */
             <div className="learn-mode animate-fadein">
               {!learningPath && !isGenerating && (
                 <div className="learn-start">
                   <div className="learn-icon">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
-                      <line x1="8" y1="7" x2="14" y2="7" /><line x1="8" y1="11" x2="16" y2="11" /><line x1="8" y1="15" x2="14" y2="15" />
-                    </svg>
+                    <GraduationCap className="w-8 h-8" />
                   </div>
                   <h2>Start Learning</h2>
                   <p>Select a book from your shelf, then let AI identify the key concepts and create structured lessons for you.</p>
@@ -473,72 +518,163 @@ function App() {
               )}
 
               {learningPath && (
-                <div className="learn-grid">
-                  <div className="concepts-panel">
-                    <div className="panel-header">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                      </svg>
-                      Key Concepts
-                    </div>
-                    <div className="concepts-content prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{learningPath}</ReactMarkdown>
-                    </div>
-                    <div className="concept-input-row">
-                      <input
-                        type="text"
-                        placeholder="Type a concept to study..."
-                        className="concept-input"
-                        value={selectedConcept}
-                        onChange={(e) => setSelectedConcept(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleGetLesson(selectedConcept)}
-                      />
-                      <Button
-                        onClick={() => handleGetLesson(selectedConcept)}
-                        disabled={isGenerating || !selectedConcept}
-                        size="sm"
+                <div className="learn-container">
+                  {/* Learn Mode Navigation Header */}
+                  <div className="learn-nav-header">
+                    <div className="learn-tabs">
+                      <button
+                        className={`learn-tab-btn ${learnTab === "concepts" ? "active" : ""}`}
+                        onClick={() => setLearnTab("concepts")}
                       >
-                        Study
+                        <Sparkles className="w-4 h-4" />
+                        Key Concepts
+                        {parsedConcepts.length > 0 && (
+                          <span className="learn-tab-badge">{parsedConcepts.length}</span>
+                        )}
+                      </button>
+                      <button
+                        className={`learn-tab-btn ${learnTab === "lesson" ? "active" : ""}`}
+                        onClick={() => setLearnTab("lesson")}
+                      >
+                        <BookOpen className="w-4 h-4" />
+                        Lesson
+                        {selectedConcept && <span className="learn-tab-dot" />}
+                      </button>
+                    </div>
+
+                    <div className="learn-header-actions">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleGenerateLearningPath}
+                        disabled={isGenerating}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isGenerating ? "animate-spin" : ""}`} />
+                        Regenerate
                       </Button>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => { setLearningPath(""); setLesson(""); setSelectedConcept(""); }}
-                      className="w-full mt-2"
-                    >
-                      Regenerate Concepts
-                    </Button>
                   </div>
 
-                  <div className="lesson-panel">
-                    <div className="panel-header">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                      </svg>
-                      {selectedConcept ? `Lesson: ${selectedConcept}` : "Lesson"}
-                    </div>
-                    {lesson ? (
-                      <div className="lesson-content prose prose-neutral dark:prose-invert max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{lesson}</ReactMarkdown>
+                  {/* TAB 1: CONCEPTS */}
+                  {learnTab === "concepts" && (
+                    <div className="concepts-tab-content animate-fadein">
+                      {/* Concept search & custom prompt box */}
+                      <div className="custom-concept-bar">
+                        <input
+                          type="text"
+                          placeholder="Or type a specific concept/topic to study..."
+                          className="custom-concept-input"
+                          value={customConcept}
+                          onChange={(e) => setCustomConcept(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && handleGetLesson(customConcept)}
+                        />
+                        <Button
+                          onClick={() => handleGetLesson(customConcept)}
+                          disabled={isGenerating || !customConcept.trim()}
+                          size="sm"
+                        >
+                          Study Custom Topic
+                        </Button>
                       </div>
-                    ) : (
-                      <div className="panel-empty">
-                        {isGenerating ? (
-                          <><Loader2Icon className="w-8 h-8 animate-spin text-primary mb-3" /><p>Preparing your lesson...</p></>
+
+                      {parsedConcepts.length > 0 ? (
+                        <div className="concepts-grid">
+                          {parsedConcepts.map((item, idx) => (
+                            <div
+                              key={item.id || idx}
+                              className={`concept-card ${selectedConcept === item.title ? "active" : ""}`}
+                              onClick={() => handleGetLesson(item.title)}
+                            >
+                              <div className="concept-card-header">
+                                <span className="concept-number">{idx + 1}</span>
+                                <h3 className="concept-card-title">{item.title}</h3>
+                              </div>
+                              {item.description && (
+                                <p className="concept-card-desc">{item.description}</p>
+                              )}
+                              <div className="concept-card-footer">
+                                <span className="concept-tag">Concept</span>
+                                <span className="concept-action">
+                                  Study Lesson <ArrowRight className="w-3.5 h-3.5 ml-1 inline" />
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        /* Fallback Markdown View if concept parsing finds no clear items */
+                        <div className="concepts-fallback-panel">
+                          <div className="prose prose-sm dark:prose-invert max-w-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{learningPath}</ReactMarkdown>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 2: LESSON */}
+                  {learnTab === "lesson" && (
+                    <div className="lesson-tab-content animate-fadein">
+                      <div className="lesson-workspace">
+                        <div className="lesson-workspace-header">
+                          <div className="lesson-topic-title">
+                            {selectedConcept ? (
+                              <>
+                                <span className="topic-subtitle">CURRENT LESSON</span>
+                                <h2>{selectedConcept}</h2>
+                              </>
+                            ) : (
+                              <h2>Lesson Workspace</h2>
+                            )}
+                          </div>
+                          {lesson && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleCopyLesson}
+                              className="copy-lesson-btn"
+                            >
+                              {copiedLesson ? (
+                                <><Check className="w-3.5 h-3.5 mr-1 text-green-500" /> Copied</>
+                              ) : (
+                                <><Copy className="w-3.5 h-3.5 mr-1" /> Copy Lesson</>
+                              )}
+                            </Button>
+                          )}
+                        </div>
+
+                        {lesson ? (
+                          <div className="lesson-body prose prose-neutral dark:prose-invert max-w-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{lesson}</ReactMarkdown>
+                          </div>
                         ) : (
-                          <>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted-foreground mb-3">
-                              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                            </svg>
-                            <p>Select a concept from the list or type one above to generate a lesson.</p>
-                          </>
+                          <div className="panel-empty lesson-empty-state">
+                            {isGenerating ? (
+                              <>
+                                <Loader2Icon className="w-10 h-10 animate-spin text-primary mb-3" />
+                                <h3>Generating Comprehensive Lesson...</h3>
+                                <p>Synthesizing key insights from your selected book.</p>
+                              </>
+                            ) : (
+                              <>
+                                <BookOpen className="w-10 h-10 text-muted-foreground mb-3 opacity-60" />
+                                <h3>No Lesson Active</h3>
+                                <p>Select a concept from the <strong>Key Concepts</strong> tab or type a topic to generate a detailed lesson.</p>
+                                <Button
+                                  variant="secondary"
+                                  className="mt-4"
+                                  onClick={() => setLearnTab("concepts")}
+                                >
+                                  Browse Key Concepts
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
