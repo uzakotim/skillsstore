@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight, RefreshCw, Copy, Check } from "lucide-react";
+import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight, RefreshCw } from "lucide-react";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
 interface Chunk {
@@ -33,7 +33,8 @@ interface ConceptItem {
   id: string;
   title: string;
   description: string;
-}
+  excerpts: string[];
+};
 
 function App() {
   const [consoleMsg, setConsoleMsg] = useAtom(consoleMsgAtom);
@@ -47,12 +48,11 @@ function App() {
   const [mode, setMode] = useState<"search" | "learn">("search");
 
   // Learn mode state
-  const [learnTab, setLearnTab] = useState<"concepts" | "lesson">("concepts");
+  const [learnTab, setLearnTab] = useState<"concepts" | "excerpts">("concepts");
   const [learningPath, setLearningPath] = useState("");
-  const [lesson, setLesson] = useState("");
+  const [relatedExcerpts, setRelatedExcerpts] = useState<string[]>([]);
   const [selectedConcept, setSelectedConcept] = useState("");
   const [customConcept, setCustomConcept] = useState("");
-  const [copiedLesson, setCopiedLesson] = useState(false);
 
   const [isUploading, setIsUploading] = useState(false);
   const [newBookId, setNewBookId] = useState<string | null>(null);
@@ -85,7 +85,7 @@ function App() {
     const loadStoredData = async () => {
       if (!selectedBookId) {
         setLearningPath("");
-        setLesson("");
+        setRelatedExcerpts([]);
         setSelectedConcept("");
         return;
       }
@@ -96,7 +96,7 @@ function App() {
         } else {
           setLearningPath("");
         }
-        setLesson("");
+        setRelatedExcerpts([]);
         setSelectedConcept("");
         setLearnTab("concepts");
       } catch (error) {
@@ -105,41 +105,94 @@ function App() {
     };
     loadStoredData();
   }, [selectedBookId]);
-
-  // Parse markdown content from learning path into structured concept cards
   const parsedConcepts = useMemo<ConceptItem[]>(() => {
     if (!learningPath) return [];
 
-    const lines = learningPath.split("\n");
-    const concepts: ConceptItem[] = [];
-    let currentTitle = "";
-    let currentDesc: string[] = [];
+    try {
+      const cleaned = learningPath
+        .trim()
+        .replace(/^```(?:markdown)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
 
-    const saveCurrent = () => {
-      if (currentTitle) {
-        concepts.push({
-          id: currentTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-          title: currentTitle,
-          description: currentDesc.join(" ").trim() || "Master this key core concept from the selected book."
-        });
-      }
-    };
+      // Find every ## Concept heading and everything until the next ## heading.
+      const sections = cleaned
+        .split(/^##\s+/gm)
+        .map((section) => section.trim())
+        .filter(Boolean);
 
-    lines.forEach((line) => {
-      const trimmed = line.trim();
-      // Match headings or bullet items with titles
-      const headingMatch = trimmed.match(/^(?:#{1,4}|\d+\.|\*|-)\s+\*?\*?([^:*#]+)\*?\*?:?(.*)$/);
-      if (headingMatch && headingMatch[1].trim().length > 2) {
-        saveCurrent();
-        currentTitle = headingMatch[1].replace(/\*\*/g, "").trim();
-        currentDesc = headingMatch[2] ? [headingMatch[2].trim()] : [];
-      } else if (trimmed && currentTitle) {
-        currentDesc.push(trimmed.replace(/^[-*]\s+/, ""));
-      }
-    });
-    saveCurrent();
+      return sections
+        .map((section) => {
+          const lines = section.split("\n");
 
-    return concepts;
+          // First line is the concept title
+          const title = lines[0]
+            .replace(/^Concept\s+\d+\s*:\s*/i, "")
+            .trim();
+
+          if (!title || title.length < 3) {
+            return null;
+          }
+
+          // Find the "### Excerpts" heading
+          const excerptsIndex = lines.findIndex((line) =>
+            /^###\s+Excerpts\s*$/i.test(line.trim())
+          );
+
+          let description = "";
+          let excerpts: string[] = [];
+
+          if (excerptsIndex !== -1) {
+            // Everything between title and ### Excerpts is the description
+            description = lines
+              .slice(1, excerptsIndex)
+              .join("\n")
+              .trim();
+
+            // Everything after ### Excerpts is the excerpts section
+            const excerptLines = lines.slice(excerptsIndex + 1);
+
+            excerpts = excerptLines
+              .map((line) => line.trim())
+              .filter((line) => /^[-*•]\s+/.test(line))
+              .map((line) =>
+                line
+                  .replace(/^[-*•]\s+/, "")
+                  .trim()
+                  .replace(/^["“”]+|["“”]+$/g, "")
+                  .trim()
+              )
+              .filter(Boolean);
+          } else {
+            // If there is no Excerpts heading, treat everything after
+            // the title as the description.
+            description = lines
+              .slice(1)
+              .join("\n")
+              .trim();
+          }
+
+          return {
+            id: title
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-|-$/g, ""),
+
+            title,
+
+            description:
+              description ||
+              "Master this key core concept from the selected book.",
+
+            excerpts,
+          };
+        })
+        .filter((item): item is ConceptItem => item !== null);
+    } catch (error) {
+      console.error("Failed to parse learning path Markdown:", error);
+      console.error("Raw learning path:", learningPath);
+      return [];
+    }
   }, [learningPath]);
 
   const handleDeleteBook = async () => {
@@ -153,7 +206,7 @@ function App() {
       setChunks([]);
       setSearchResults([]);
       setLearningPath("");
-      setLesson("");
+      setRelatedExcerpts([]);
       setSelectedConcept("");
       fetchBooks();
     } catch (error) {
@@ -224,28 +277,29 @@ function App() {
     }
   };
 
-  const handleGetLesson = async (concept: string) => {
+  const handleGetRelatedExcerpts = async (concept: string) => {
     if (!selectedBookId || !concept.trim()) return;
     setSelectedConcept(concept);
-    setLearnTab("lesson");
+    setLearnTab("excerpts");
     setIsGenerating(true);
-    setConsoleMsg(`Generating lesson on "${concept}"...`);
+    setRelatedExcerpts([]);
+    setConsoleMsg(`Finding passages related to "${concept}"...`);
     try {
-      const result = await invoke<string>("generate_lesson", { concept, bookId: selectedBookId });
-      setLesson(result);
-      setConsoleMsg("Lesson generated!");
+      const results = await invoke<string[]>("search_context", {
+        query: concept,
+        bookId: selectedBookId,
+      });
+      setRelatedExcerpts(results);
+      setConsoleMsg(
+        results.length > 0
+          ? `Found ${results.length} related passage${results.length === 1 ? "" : "s"} from the book.`
+          : "No related passages found in the book."
+      );
     } catch (error) {
-      setConsoleMsg(`Error: ${error}`);
+      setConsoleMsg(`Error finding related passages: ${error}`);
     } finally {
       setIsGenerating(false);
     }
-  };
-
-  const handleCopyLesson = () => {
-    if (!lesson) return;
-    navigator.clipboard.writeText(lesson);
-    setCopiedLesson(true);
-    setTimeout(() => setCopiedLesson(false), 2000);
   };
 
   const handleUploadStart = () => {
@@ -495,7 +549,7 @@ function App() {
                     <GraduationCap className="w-8 h-8" />
                   </div>
                   <h2>Start Learning</h2>
-                  <p>Select a book from your shelf, then let AI identify the key concepts and create structured lessons for you.</p>
+                  <p>Select a book from your shelf, then let AI identify the key concepts and show the relevant passages from the book.</p>
                   <Button
                     onClick={handleGenerateLearningPath}
                     size="lg"
@@ -533,8 +587,8 @@ function App() {
                         )}
                       </button>
                       <button
-                        className={`learn-tab-btn ${learnTab === "lesson" ? "active" : ""}`}
-                        onClick={() => setLearnTab("lesson")}
+                        className={`learn-tab-btn ${learnTab === "excerpts" ? "active" : ""}`}
+                        onClick={() => setLearnTab("excerpts")}
                       >
                         <BookOpen className="w-4 h-4" />
                         Lesson
@@ -563,18 +617,18 @@ function App() {
                       <div className="custom-concept-bar">
                         <input
                           type="text"
-                          placeholder="Or type a specific concept/topic to study..."
+                          placeholder="Or type a specific concept/topic to find in the book..."
                           className="custom-concept-input"
                           value={customConcept}
                           onChange={(e) => setCustomConcept(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && handleGetLesson(customConcept)}
+                          onKeyDown={(e) => e.key === "Enter" && handleGetRelatedExcerpts(customConcept)}
                         />
                         <Button
-                          onClick={() => handleGetLesson(customConcept)}
+                          onClick={() => handleGetRelatedExcerpts(customConcept)}
                           disabled={isGenerating || !customConcept.trim()}
                           size="sm"
                         >
-                          Study Custom Topic
+                          Find Related Excerpts
                         </Button>
                       </div>
 
@@ -584,7 +638,12 @@ function App() {
                             <div
                               key={item.id || idx}
                               className={`concept-card ${selectedConcept === item.title ? "active" : ""}`}
-                              onClick={() => handleGetLesson(item.title)}
+                              onClick={() => {
+                                console.log(parsedConcepts)
+                                setSelectedConcept(item.title);
+                                setRelatedExcerpts(item.excerpts || []);
+                                setLearnTab("excerpts");
+                              }}
                             >
                               <div className="concept-card-header">
                                 <span className="concept-number">{idx + 1}</span>
@@ -596,7 +655,7 @@ function App() {
                               <div className="concept-card-footer">
                                 <span className="concept-tag">Concept</span>
                                 <span className="concept-action">
-                                  Study Lesson <ArrowRight className="w-3.5 h-3.5 ml-1 inline" />
+                                  View Excerpts <ArrowRight className="w-3.5 h-3.5 ml-1 inline" />
                                 </span>
                               </div>
                             </div>
@@ -613,54 +672,46 @@ function App() {
                     </div>
                   )}
 
-                  {/* TAB 2: LESSON */}
-                  {learnTab === "lesson" && (
+                  {/* TAB 2: RELATED EXCERPTS */}
+                  {learnTab === "excerpts" && (
                     <div className="lesson-tab-content animate-fadein">
                       <div className="lesson-workspace">
                         <div className="lesson-workspace-header">
                           <div className="lesson-topic-title">
                             {selectedConcept ? (
                               <>
-                                <span className="topic-subtitle">CURRENT LESSON</span>
+                                <span className="topic-subtitle">RELATED EXCERPTS</span>
                                 <h2>{selectedConcept}</h2>
                               </>
                             ) : (
-                              <h2>Lesson Workspace</h2>
+                              <h2>Related Book Excerpts</h2>
                             )}
                           </div>
-                          {lesson && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={handleCopyLesson}
-                              className="copy-lesson-btn"
-                            >
-                              {copiedLesson ? (
-                                <><Check className="w-3.5 h-3.5 mr-1 text-green-500" /> Copied</>
-                              ) : (
-                                <><Copy className="w-3.5 h-3.5 mr-1" /> Copy Lesson</>
-                              )}
-                            </Button>
-                          )}
+
                         </div>
 
-                        {lesson ? (
-                          <div className="lesson-body prose prose-neutral dark:prose-invert max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{lesson}</ReactMarkdown>
+                        {relatedExcerpts.length > 0 ? (
+                          <div className="context-list">
+                            {relatedExcerpts.map((excerpt, i) => (
+                              <div key={i} className="context-item">
+                                <span className="context-num">{i + 1}</span>
+                                <p className="context-text">"{excerpt}"</p>
+                              </div>
+                            ))}
                           </div>
                         ) : (
                           <div className="panel-empty lesson-empty-state">
                             {isGenerating ? (
                               <>
                                 <Loader2Icon className="w-10 h-10 animate-spin text-primary mb-3" />
-                                <h3>Generating Comprehensive Lesson...</h3>
-                                <p>Synthesizing key insights from your selected book.</p>
+                                <h3>Finding Related Excerpts...</h3>
+                                <p>Searching the selected book for passages related to this concept.</p>
                               </>
                             ) : (
                               <>
                                 <BookOpen className="w-10 h-10 text-muted-foreground mb-3 opacity-60" />
-                                <h3>No Lesson Active</h3>
-                                <p>Select a concept from the <strong>Key Concepts</strong> tab or type a topic to generate a detailed lesson.</p>
+                                <h3>No Related Excerpts</h3>
+                                <p>Select a concept from the <strong>Key Concepts</strong> tab or type a topic to find matching passages in the book.</p>
                                 <Button
                                   variant="secondary"
                                   className="mt-4"
