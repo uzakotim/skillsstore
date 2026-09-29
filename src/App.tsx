@@ -11,6 +11,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight, RefreshCw } from "lucide-react";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { Modal, ModalHeader, ModalBody, ModalTitle } from "@/components/custom/Modal";
 
 interface Chunk {
   id: number;
@@ -53,6 +54,8 @@ function App() {
   const [relatedExcerpts, setRelatedExcerpts] = useState<string[]>([]);
   const [selectedConcept, setSelectedConcept] = useState("");
   const [customConcept, setCustomConcept] = useState("");
+  const [conceptDescModalOpen, setConceptDescModalOpen] = useState(false);
+  const [selectedConceptDescription, setConceptDescription] = useState("");
 
   const [isUploading, setIsUploading] = useState(false);
   const [newBookId, setNewBookId] = useState<string | null>(null);
@@ -653,7 +656,12 @@ function App() {
                                 <p className="concept-card-desc">{item.description}</p>
                               )}
                               <div className="concept-card-footer">
-                                <span className="concept-tag">Concept</span>
+                                <span className="concept-tag concept-tag-clickable" onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedConcept(item.title);
+                                  setConceptDescription(item.description || "");
+                                  setConceptDescModalOpen(true);
+                                }}>Concept</span>
                                 <span className="concept-action">
                                   View Excerpts <ArrowRight className="w-3.5 h-3.5 ml-1 inline" />
                                 </span>
@@ -731,6 +739,18 @@ function App() {
             </div>
           )}
         </div>
+        {/* Modal for viewing concept description */}
+        <Modal
+          isOpen={conceptDescModalOpen}
+          onClose={() => setConceptDescModalOpen(false)}
+        >
+          <ModalHeader onClose={() => setConceptDescModalOpen(false)}>
+            <ModalTitle>{selectedConcept}</ModalTitle>
+          </ModalHeader>
+          <ModalBody>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedConceptDescription}</ReactMarkdown>
+          </ModalBody>
+        </Modal>
       </main>
 
       {/* Model Manager Overlay */}

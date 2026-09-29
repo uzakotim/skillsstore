@@ -1017,6 +1017,10 @@
 .concept-tag {
   font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--muted-foreground);
+  transition: color 0.15s ease;
+}
+.concept-tag:hover {
+  color: var(--foreground);
 }
 .concept-action {
   font-size: 0.78rem; font-weight: 600; color: var(--primary);
