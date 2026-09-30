@@ -400,7 +400,7 @@ function App() {
             </h1>
           </div>
           <div className="topbar-right">
-            <span className="status-chip">{consoleMsg || "Ready"}</span>
+            <span className="status-chip w-[60hw]">{consoleMsg || "Ready"}</span>
             <button
               className="debug-btn"
               onClick={handleGetChunks}

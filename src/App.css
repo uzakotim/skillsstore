@@ -267,7 +267,7 @@
   border: 1px solid var(--border);
   border-radius: 20px;
   color: var(--muted-foreground);
-  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .debug-btn {
   display: flex; align-items: center; gap: 6px;
