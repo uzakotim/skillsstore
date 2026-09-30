@@ -521,12 +521,16 @@ function App() {
                 {showChunksPanel && chunks.length > 0 && (
                   <div className="chunks-panel">
                     <div className="panel-header">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
-                      </svg>
-                      Knowledge Grains
-                      <span className="panel-count">{chunks.length}</span>
-                      <button className="panel-close" onClick={() => setShowChunksPanel(false)}>×</button>
+                      <div className="flex items-center gap-2">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
+                        </svg>
+                        Knowledge Grains
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="panel-count">{chunks.length}</span>
+                        <button className="panel-close" onClick={() => setShowChunksPanel(false)}>×</button>
+                      </div>
                     </div>
                     <div className="chunks-list">
                       {chunks.map((chunk) => (

@@ -169,7 +169,7 @@
   color: var(--foreground);
 }
 
-.sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-nav { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
 
 .nav-item {
   display: flex; align-items: center; gap: 10px;
@@ -507,7 +507,7 @@
 
 /* ─── Panel shared styles ─────────────────────────────────────────────────── */
 .panel-header {
-  display: flex; align-items: center; gap: 7px;
+  display: flex; justify-content: space-between; align-items: center; gap: 7px;
   font-size: 0.78rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--muted-foreground);
