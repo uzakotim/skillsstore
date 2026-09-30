@@ -139,7 +139,7 @@
   flex-direction: column;
   background: var(--card);
   border-right: 1px solid var(--border);
-  padding: 20px 14px;
+  padding: 6px 14px 20px;
   gap: 6px;
   position: relative;
   z-index: 10;
@@ -151,7 +151,8 @@
   gap: 10px;
   padding: 4px 6px 12px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 8px;
+  margin: 0 -14px 8px;
+  padding-left: 20px;
 }
 .logo-icon {
   width: 36px; height: 36px;
@@ -190,7 +191,8 @@
 }
 .nav-item.active svg { stroke: var(--primary-foreground); }
 
-.sidebar-divider { height: 1px; background: var(--border); margin: 8px 0; }
+.sidebar-divider { height: 1px; background: var(--border); margin: 0 -14px 8px;
+  padding-left: 20px; }
 
 .model-config-summary {
   padding: 10px 12px;
