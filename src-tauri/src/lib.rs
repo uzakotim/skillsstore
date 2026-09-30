@@ -199,10 +199,13 @@ fn start_ollama(
 
     // Kill anything that was started outside this app.
     kill_existing_ollama();
-
-    let mut child = Command::new("ollama")
+    let ollama_path = find_ollama()?;
+    let mut child = Command::new(ollama_path)
         .arg("serve")
         .env("OLLAMA_HOST", "127.0.0.1:11434")
+        .env(
+            "PATH",
+        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Applications/Ollama.app/Contents/Resources")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
@@ -885,10 +888,35 @@ fn kill_existing_ollama() {
             .output();
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("pkill").arg("-x").arg("ollama").output();
+        let _ = Command::new("/usr/bin/pkill")
+            .args(["-x", "ollama"])
+            .output();
     }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("/usr/bin/pkill")
+            .args(["-x", "ollama"])
+            .output();
+    }
+}
+
+fn find_ollama() -> Result<String, String> {
+    let candidates = [
+        "/Applications/Ollama.app/Contents/Resources/ollama",
+        "/usr/local/bin/ollama",
+        "/opt/homebrew/bin/ollama",
+    ];
+
+    for path in candidates {
+        if std::path::Path::new(path).exists() {
+            return Ok(path.to_string());
+        }
+    }
+
+    Err("Could not find Ollama executable".to_string())
 }
 // ─── App Setup ────────────────────────────────────────────────────────────────
 
