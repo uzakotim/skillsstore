@@ -4,6 +4,9 @@ mod rag;
 use rag::faiss::VectorIndex;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
+use std::io::{BufRead, BufReader};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tauri::Manager;
 
@@ -97,9 +100,15 @@ pub struct PullProgress {
     percent: Option<f64>,
 }
 
-// ─── Model Config Storage (in-memory + persisted to a simple JSON file) ────────
+#[derive(Serialize, Clone)]
+pub struct AnalysisProgress {
+    pub status: String,
+    pub processed: Option<u64>,
+    pub total: Option<u64>,
+    pub percent: Option<f64>,
+}
 
-use std::sync::Mutex;
+// ─── Model Config Storage (in-memory + persisted to a simple JSON file) ────────
 
 pub struct ModelConfigState {
     pub config: Mutex<ModelConfig>,
@@ -161,7 +170,92 @@ impl ModelConfigState {
         }
     }
 }
+struct OllamaProcess {
+    child: Arc<Mutex<Option<Child>>>,
+}
+
+impl OllamaProcess {
+    fn new() -> Self {
+        Self {
+            child: Arc::new(Mutex::new(None)),
+        }
+    }
+}
 // ─── Ollama Tauri Commands ────────────────────────────────────────────────────
+#[tauri::command]
+fn start_ollama(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, OllamaProcess>,
+) -> Result<(), String> {
+    let mut guard = state
+        .child
+        .lock()
+        .map_err(|_| "Failed to lock Ollama process state".to_string())?;
+
+    // Already owned by this app.
+    if guard.is_some() {
+        return Ok(());
+    }
+
+    // Kill anything that was started outside this app.
+    kill_existing_ollama();
+
+    let mut child = Command::new("ollama")
+        .arg("serve")
+        .env("OLLAMA_HOST", "127.0.0.1:11434")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to start Ollama: {}", e))?;
+
+    // Ollama normally writes server logs to stderr.
+    if let Some(stderr) = child.stderr.take() {
+        let app_handle = app.clone();
+
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+
+            for line in reader.lines() {
+                let Ok(line) = line else {
+                    break;
+                };
+
+                println!("[Ollama] {}", line);
+
+                if let Some((processed, total)) = parse_prompt_processing_progress(&line) {
+                    let percent = (processed as f64 / total as f64) * 100.0;
+
+                    let payload = AnalysisProgress {
+                        status: "Processing book context".to_string(),
+                        processed: Some(processed),
+                        total: Some(total),
+                        percent: Some(percent),
+                    };
+
+                    let _ = app_handle.emit("analysis-progress", payload);
+                }
+            }
+        });
+    }
+
+    // Also listen to stdout in case a future Ollama version uses it.
+    if let Some(stdout) = child.stdout.take() {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    println!("[Ollama] {}", line);
+                }
+            }
+        });
+    }
+
+    *guard = Some(child);
+
+    Ok(())
+}
 
 #[tauri::command]
 async fn list_local_models() -> Result<Vec<OllamaModelInfo>, String> {
@@ -497,6 +591,7 @@ async fn generate_learning_path(
     book_id: String,
     pool: tauri::State<'_, SqlitePool>,
     model_config: tauri::State<'_, ModelConfigState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     let existing =
         sqlx::query_as::<_, (String,)>("SELECT content FROM learning_paths WHERE book_id = ?")
@@ -599,6 +694,15 @@ Before producing the final answer, internally check:
 
 CONCEPTS:"#,
         context
+    );
+    let _ = app.emit(
+        "analysis-progress",
+        AnalysisProgress {
+            status: "Starting analysis...".to_string(),
+            processed: None,
+            total: None,
+            percent: None,
+        },
     );
     let generated_content = call_ollama(&llm_model, prompt).await?;
     sqlx::query("INSERT INTO learning_paths (book_id, content) VALUES (?, ?)")
@@ -746,7 +850,46 @@ async fn delete_book(book_id: String, pool: tauri::State<'_, SqlitePool>) -> Res
 
     Ok(())
 }
+fn parse_prompt_processing_progress(line: &str) -> Option<(u64, u64)> {
+    if !line.contains("Prompt processing progress") {
+        return None;
+    }
 
+    let processed = line
+        .split("processed=")
+        .nth(1)?
+        .split_whitespace()
+        .next()?
+        .parse::<u64>()
+        .ok()?;
+
+    let total = line
+        .split("total=")
+        .nth(1)?
+        .split_whitespace()
+        .next()?
+        .parse::<u64>()
+        .ok()?;
+
+    if total == 0 {
+        return None;
+    }
+
+    Some((processed, total))
+}
+fn kill_existing_ollama() {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/IM", "ollama.exe", "/T"])
+            .output();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = Command::new("pkill").arg("-x").arg("ollama").output();
+    }
+}
 // ─── App Setup ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -777,6 +920,12 @@ pub fn run() {
             app.manage(pool);
             app.manage(AppStorage { dir: app_data_dir });
             app.manage(model_config);
+            app.manage(OllamaProcess::new());
+            let ollama_process = app.state::<OllamaProcess>();
+
+            if let Err(e) = start_ollama(app.handle().clone(), ollama_process) {
+                eprintln!("Failed to start Ollama: {}", e);
+            }
 
             Ok(())
         })
@@ -800,6 +949,8 @@ pub fn run() {
             pull_model,
             get_model_config,
             set_model_config,
+            // Ollama
+            start_ollama,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

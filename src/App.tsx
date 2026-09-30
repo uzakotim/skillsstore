@@ -12,6 +12,7 @@ import remarkGfm from "remark-gfm";
 import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight, RefreshCw } from "lucide-react";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { Modal, ModalHeader, ModalBody, ModalTitle } from "@/components/custom/Modal";
+import { listen } from "@tauri-apps/api/event";
 
 interface Chunk {
   id: number;
@@ -36,6 +37,12 @@ interface ConceptItem {
   description: string;
   excerpts: string[];
 };
+interface AnalysisProgress {
+  status: string;
+  processed?: number;
+  total?: number;
+  percent?: number | null;
+}
 
 function App() {
   const [consoleMsg, setConsoleMsg] = useAtom(consoleMsgAtom);
@@ -62,6 +69,30 @@ function App() {
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({ llm_model: "gemma2:2b", embed_model: "nomic-embed-text" });
   const [showChunksPanel, setShowChunksPanel] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let mounted = true;
+
+    const setup = async () => {
+      unlisten = await listen<AnalysisProgress>(
+        "analysis-progress",
+        (event) => {
+          if (!mounted) return;
+
+          setAnalysisProgress(event.payload);
+        }
+      );
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, []);
 
   const fetchBooks = useCallback(async () => {
     try {
@@ -71,6 +102,7 @@ function App() {
       console.error("Error fetching books:", error);
     }
   }, []);
+
 
   const fetchModelConfig = useCallback(async () => {
     try {
@@ -128,6 +160,7 @@ function App() {
     };
     loadStoredData();
   }, [selectedBookId]);
+
   const parsedConcepts = useMemo<ConceptItem[]>(() => {
     if (!learningPath) return [];
 
@@ -278,6 +311,7 @@ function App() {
     });
     setAiResponse(response);
     setIsGenerating(false);
+    setAnalysisProgress(null);
     setConsoleMsg("AI generation complete!");
   };
 
@@ -286,6 +320,7 @@ function App() {
       setConsoleMsg("Please select a book first");
       return;
     }
+
     setIsGenerating(true);
     setConsoleMsg("Analysing book concepts...");
     try {
@@ -295,7 +330,9 @@ function App() {
       setConsoleMsg("Concepts ready!");
     } catch (error) {
       setConsoleMsg(`Error: ${error}`);
+
     } finally {
+      setAnalysisProgress(null);
       setIsGenerating(false);
     }
   };
@@ -322,6 +359,7 @@ function App() {
       setConsoleMsg(`Error finding related passages: ${error}`);
     } finally {
       setIsGenerating(false);
+      setAnalysisProgress(null);
     }
   };
 
@@ -601,7 +639,44 @@ function App() {
               {isGenerating && !learningPath && (
                 <div className="learn-loading">
                   <Loader2Icon className="w-12 h-12 text-primary animate-spin" />
-                  <p>Analysing your book's key concepts...</p>
+
+                  <p>
+                    {analysisProgress?.status ||
+                      "Analysing your book's key concepts..."}
+                  </p>
+
+                  {analysisProgress?.percent != null && (
+                    <div className="pull-progress-bar rounded-xl w-[80%]">
+                      <div className="pull-info flex gap-10 ">
+                        <span className="pull-status">
+                          Progress
+                        </span>
+                        <span className="pull-percent">
+                          {analysisProgress.percent.toFixed(0)}%
+                        </span>
+                      </div>
+
+                      <div className="pull-track">
+                        <div
+                          className="pull-fill"
+                          style={{
+                            width: `${analysisProgress.percent}%`,
+                            transition: "width 0.3s ease",
+                          }}
+                        />
+                      </div>
+
+                      {analysisProgress.processed != null &&
+                        analysisProgress.total != null && (
+                          <div className="pull-info">
+                            <span className="pull-status">
+                              {analysisProgress.processed.toLocaleString()} /{" "}
+                              {analysisProgress.total.toLocaleString()} tokens
+                            </span>
+                          </div>
+                        )}
+                    </div>
+                  )}
                 </div>
               )}
 
