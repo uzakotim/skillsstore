@@ -47,7 +47,7 @@ function App() {
   const [aiResponse, setAiResponse] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [mode, setMode] = useState<"search" | "learn">("search");
-
+  const [ollamaStatus, setOllamaStatus] = useState<"checking" | "online" | "offline">("checking");
   // Learn mode state
   const [learnTab, setLearnTab] = useState<"concepts" | "excerpts">("concepts");
   const [learningPath, setLearningPath] = useState("");
@@ -77,6 +77,26 @@ function App() {
       const cfg = await invoke<ModelConfig>("get_model_config");
       setModelConfig(cfg);
     } catch { }
+  }, []);
+
+  interface OllamaModel {
+    name: string;
+    size?: number;
+    digest?: string;
+  }
+
+  const checkOllamaStatus = async () => {
+    try {
+      await invoke<OllamaModel[]>("list_local_models");
+      setOllamaStatus("online");
+    } catch {
+      setOllamaStatus("offline");
+    }
+  };
+  useEffect(() => {
+    checkOllamaStatus();
+    const interval = setInterval(checkOllamaStatus, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -380,13 +400,20 @@ function App() {
 
         <div className="sidebar-spacer" />
 
-        <button className="sidebar-bottom-btn" onClick={() => setModelManagerOpen(true)}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" />
-          </svg>
-          AI Models
-        </button>
+        <div className="flex flex-col gap-2">
+          <div className={`ollama-status ${ollamaStatus}`}>
+            <span className="status-dot" />
+            <span>Ollama {ollamaStatus === "online" ? "Online" : ollamaStatus === "offline" ? "Offline" : "Checking..."}</span>
+          </div>
+
+          <button className="sidebar-bottom-btn" onClick={() => setModelManagerOpen(true)}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" />
+            </svg>
+            AI Models
+          </button>
+        </div>
       </aside>
 
       {/* Main area */}
