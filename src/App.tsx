@@ -56,7 +56,9 @@ function App() {
   const [mode, setMode] = useState<"search" | "learn">("search");
   const [ollamaStatus, setOllamaStatus] = useState<"checking" | "online" | "offline">("checking");
   // Learn mode state
-  const [learnTab, setLearnTab] = useState<"concepts" | "excerpts">("concepts");
+  const [learnTab, setLearnTab] = useState<"concepts" | "excerpts" | "lesson">("concepts");
+  const [lesson, setLesson] = useState("");
+
   const [learningPath, setLearningPath] = useState("");
   const [relatedExcerpts, setRelatedExcerpts] = useState<string[]>([]);
   const [selectedConcept, setSelectedConcept] = useState("");
@@ -142,6 +144,7 @@ function App() {
         setLearningPath("");
         setRelatedExcerpts([]);
         setSelectedConcept("");
+        setLesson("");
         return;
       }
       try {
@@ -153,6 +156,7 @@ function App() {
         }
         setRelatedExcerpts([]);
         setSelectedConcept("");
+        setLesson("");
         setLearnTab("concepts");
       } catch (error) {
         console.error("Error loading stored data:", error);
@@ -161,6 +165,40 @@ function App() {
     loadStoredData();
   }, [selectedBookId]);
 
+  useEffect(() => {
+    if (!selectedBookId || !selectedConcept.trim()) {
+      setLesson("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadLesson = async () => {
+      setLesson("");
+
+      try {
+        const cachedLesson = await invoke<string | null>("get_lesson", {
+          concept: selectedConcept,
+          bookId: selectedBookId,
+        });
+
+        if (!cancelled) {
+          setLesson(cachedLesson ?? "");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Error loading lesson:", error);
+          setLesson("");
+        }
+      }
+    };
+
+    loadLesson();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBookId, selectedConcept]);
   const parsedConcepts = useMemo<ConceptItem[]>(() => {
     if (!learningPath) return [];
 
@@ -337,22 +375,54 @@ function App() {
     }
   };
 
+  const handleGenerateExplanation = async () => {
+    if (!selectedBookId || !selectedConcept) {
+      setConsoleMsg("Please select a book and concept first.");
+      return;
+    }
+
+    setLearnTab("lesson");
+    setIsGenerating(true);
+    setConsoleMsg(`Generating lesson for "${selectedConcept}"...`);
+
+    try {
+      const explanation = await invoke<string>("generate_lesson", {
+        concept: selectedConcept,
+        bookId: selectedBookId,
+      });
+
+      setLesson(explanation);
+      setAiResponse(explanation);
+      setConsoleMsg("Lesson generated successfully!");
+    } catch (error) {
+      console.error("Error generating lesson:", error);
+      setConsoleMsg(`Error generating lesson: ${error}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
   const handleGetRelatedExcerpts = async (concept: string) => {
     if (!selectedBookId || !concept.trim()) return;
+
     setSelectedConcept(concept);
+    setLesson("");
     setLearnTab("excerpts");
     setIsGenerating(true);
     setRelatedExcerpts([]);
     setConsoleMsg(`Finding passages related to "${concept}"...`);
+
     try {
       const results = await invoke<string[]>("search_context", {
         query: concept,
         bookId: selectedBookId,
       });
+
       setRelatedExcerpts(results);
+
       setConsoleMsg(
         results.length > 0
-          ? `Found ${results.length} related passage${results.length === 1 ? "" : "s"} from the book.`
+          ? `Found ${results.length} related passage${results.length === 1 ? "" : "s"
+          } from the book.`
           : "No related passages found in the book."
       );
     } catch (error) {
@@ -686,26 +756,48 @@ function App() {
                   <div className="learn-nav-header">
                     <div className="learn-tabs">
                       <button
-                        className={`learn-tab-btn ${learnTab === "concepts" ? "active" : ""}`}
+                        className={`learn-tab-btn ${learnTab === "concepts" ? "active" : ""
+                          }`}
                         onClick={() => setLearnTab("concepts")}
                       >
                         <Sparkles className="w-4 h-4" />
                         Key Concepts
+
                         {parsedConcepts.length > 0 && (
-                          <span className="learn-tab-badge">{parsedConcepts.length}</span>
+                          <span className="learn-tab-badge">
+                            {parsedConcepts.length}
+                          </span>
                         )}
                       </button>
+
                       <button
-                        className={`learn-tab-btn ${learnTab === "excerpts" ? "active" : ""}`}
+                        className={`learn-tab-btn ${learnTab === "excerpts" ? "active" : ""
+                          }`}
                         onClick={() => setLearnTab("excerpts")}
                       >
                         <BookOpen className="w-4 h-4" />
+                        Excerpts
+
+                        {selectedConcept && (
+                          <span className="learn-tab-dot" />
+                        )}
+                      </button>
+
+                      <button
+                        className={`learn-tab-btn ${learnTab === "lesson" ? "active" : ""
+                          }`}
+                        onClick={() => setLearnTab("lesson")}
+                      >
+                        <GraduationCap className="w-4 h-4" />
                         Lesson
-                        {selectedConcept && <span className="learn-tab-dot" />}
+
+                        {lesson && (
+                          <span className="learn-tab-dot" />
+                        )}
                       </button>
                     </div>
 
-                    <div className="learn-header-actions">
+                    {/* <div className="learn-header-actions">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -716,7 +808,7 @@ function App() {
                         <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isGenerating ? "animate-spin" : ""}`} />
                         Regenerate
                       </Button>
-                    </div>
+                    </div> */}
                   </div>
 
                   {/* TAB 1: CONCEPTS */}
@@ -748,7 +840,6 @@ function App() {
                               key={item.id || idx}
                               className={`concept-card ${selectedConcept === item.title ? "active" : ""}`}
                               onClick={() => {
-                                console.log(parsedConcepts)
                                 setSelectedConcept(item.title);
                                 setRelatedExcerpts(item.excerpts || []);
                                 setLearnTab("excerpts");
@@ -802,6 +893,26 @@ function App() {
                             )}
                           </div>
 
+                          <Button
+                            onClick={handleGenerateExplanation}
+                            disabled={
+                              isGenerating ||
+                              !selectedBookId ||
+                              !selectedConcept.trim()
+                            }
+                          >
+                            {isGenerating ? (
+                              <>
+                                <Loader2Icon className="w-4 h-4 mr-2 animate-spin" />
+                                Generating...
+                              </>
+                            ) : (
+                              <>
+                                <GraduationCap className="w-4 h-4 mr-2" />
+                                Generate Lesson
+                              </>
+                            )}
+                          </Button>
                         </div>
 
                         {relatedExcerpts.length > 0 ? (
@@ -840,6 +951,102 @@ function App() {
                       </div>
                     </div>
                   )}
+                  {/* TAB 3: LESSON */}
+                  {learnTab === "lesson" && (
+                    <div className="lesson-tab-content animate-fadein">
+                      <div className="lesson-workspace">
+                        <div className="lesson-workspace-header">
+                          <div className="lesson-topic-title">
+                            <span className="topic-subtitle">AI LESSON</span>
+
+                            <h2>
+                              {selectedConcept || "Select a concept"}
+                            </h2>
+                          </div>
+
+                          {/* <Button
+                            onClick={handleGenerateExplanation}
+                            disabled={
+                              isGenerating ||
+                              !selectedBookId ||
+                              !selectedConcept.trim()
+                            }
+                            variant="secondary"
+                          >
+                            {isGenerating ? (
+                              <>
+                                <Loader2Icon className="w-4 h-4 mr-2 animate-spin" />
+                                Generating...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="w-4 h-4 mr-2" />
+                                Regenerate
+                              </>
+                            )}
+                          </Button> */}
+                        </div>
+
+                        {!selectedConcept ? (
+                          <div className="panel-empty lesson-empty-state">
+                            <GraduationCap className="w-10 h-10 text-muted-foreground mb-3 opacity-60" />
+
+                            <h3>Select a Concept</h3>
+
+                            <p>
+                              Choose a concept from the{" "}
+                              <strong>Key Concepts</strong> tab to generate a lesson.
+                            </p>
+
+                            <Button
+                              variant="secondary"
+                              className="mt-4"
+                              onClick={() => setLearnTab("concepts")}
+                            >
+                              Browse Key Concepts
+                            </Button>
+                          </div>
+                        ) : isGenerating && !lesson ? (
+                          <div className="panel-empty lesson-empty-state">
+                            <Loader2Icon className="w-10 h-10 animate-spin text-primary mb-3" />
+
+                            <h3>Generating Lesson...</h3>
+
+                            <p>
+                              Building a lesson about{" "}
+                              <strong>{selectedConcept}</strong> from your book.
+                            </p>
+                          </div>
+                        ) : lesson ? (
+                          <div className="ai-response-content prose prose-sm dark:prose-invert max-w-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {lesson}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          <div className="panel-empty lesson-empty-state">
+                            <GraduationCap className="w-10 h-10 text-muted-foreground mb-3 opacity-60" />
+
+                            <h3>Ready to Learn</h3>
+
+                            <p>
+                              Generate a lesson about{" "}
+                              <strong>{selectedConcept}</strong> using the selected book.
+                            </p>
+
+                            <Button
+                              className="mt-4"
+                              onClick={handleGenerateExplanation}
+                              disabled={!selectedBookId}
+                            >
+                              <Sparkles className="w-4 h-4 mr-2" />
+                              Generate Lesson
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -857,15 +1064,16 @@ function App() {
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedConceptDescription}</ReactMarkdown>
           </ModalBody>
         </Modal>
-      </main>
+      </main >
 
       {/* Model Manager Overlay */}
-      <ModelManager
+      < ModelManager
         isOpen={modelManagerOpen}
-        onClose={() => setModelManagerOpen(false)}
+        onClose={() => setModelManagerOpen(false)
+        }
         onConfigChange={(cfg) => setModelConfig(cfg)}
       />
-    </div>
+    </div >
   );
 }
 

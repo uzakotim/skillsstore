@@ -641,12 +641,11 @@ REQUIREMENTS:
 * Do NOT combine multiple major ideas into one concept just to reduce the number of concepts.
 * Cover different parts and themes of the book when possible.
 * Prioritize concepts that are useful for actually understanding and applying the book.
-* Avoid generic or trivial concepts.
 * Avoid duplicate or highly overlapping concepts.
 * Think broadly before producing the final answer.
 * Each concept should teach the student something specific.
 * For every concept, provide a clear and comprehensive explanation.
-* For every concept, provide 3-5 relevant excerpts from the provided context.
+* For every concept, provide as many relevant excerpts from the provided context as possible.
 * Only use excerpts that actually appear in the provided context. Do not invent quotations.
 * If the context does not contain enough information for 8 concepts, generate as many distinct concepts as the context genuinely supports rather than inventing information.
 
@@ -684,14 +683,14 @@ Use EXACTLY this structure for every concept:
 
 ---
 
-Continue until you have identified all important distinct concepts, targeting 8-15 concepts.
+Continue until you have identified all important distinct concepts.
 
 Before producing the final answer, internally check:
 
-1. Did I generate at least 8 distinct concepts when the context supports it?
+1. Did I generate at least 3 distinct concepts when the context supports it?
 2. Are the concepts meaningfully different from each other?
 3. Does each concept have a useful explanation?
-4. Does each concept have 3-5 relevant excerpts?
+4. Does each concept have relevant excerpts?
 5. Did I avoid inventing excerpts?
 6. Did I cover different themes from the context?
 
@@ -717,7 +716,23 @@ CONCEPTS:"#,
 
     Ok(generated_content)
 }
+#[tauri::command]
+async fn get_lesson(
+    concept: String,
+    book_id: String,
+    pool: tauri::State<'_, SqlitePool>,
+) -> Result<Option<String>, String> {
+    let lesson = sqlx::query_as::<_, (String,)>(
+        "SELECT content FROM lessons WHERE book_id = ? AND concept = ?",
+    )
+    .bind(&book_id)
+    .bind(&concept)
+    .fetch_optional(pool.inner())
+    .await
+    .map_err(|e| e.to_string())?;
 
+    Ok(lesson.map(|row| row.0))
+}
 #[tauri::command]
 async fn generate_lesson(
     concept: String,
@@ -977,6 +992,7 @@ pub fn run() {
             pull_model,
             get_model_config,
             set_model_config,
+            get_lesson,
             // Ollama
             start_ollama,
         ])
