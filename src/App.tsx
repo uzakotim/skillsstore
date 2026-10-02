@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight, Save, LoaderIcon, Upload, Download, DownloadIcon, UploadIcon } from "lucide-react";
+import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight, DownloadIcon, UploadIcon } from "lucide-react";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { Modal, ModalHeader, ModalBody, ModalTitle } from "@/components/custom/Modal";
 import { listen } from "@tauri-apps/api/event";
@@ -617,7 +617,11 @@ function App() {
             </h1>
           </div>
           <div className="topbar-right">
-            <span className="status-chip max-w-[50hw]">{consoleMsg || "Ready"}</span>
+            <div className="status-chip-wrapper">
+              <span className="status-chip" title={consoleMsg}>
+                {consoleMsg || "Ready"}
+              </span>
+            </div>
             <button
               className="debug-btn"
               onClick={handleSaveDatabase}
@@ -647,7 +651,6 @@ function App() {
             </button>
           </div>
         </header>
-
         {/* Bookshelf area */}
         <div className="bookshelf-section">
           <div className="bookshelf-section-top">

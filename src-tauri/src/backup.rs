@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 use std::{
     fs::{self, File},
-    io::{self, Read, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };

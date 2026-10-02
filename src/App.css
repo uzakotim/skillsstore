@@ -248,6 +248,9 @@
   min-width: 0;
 }
 
+
+/* ─── Topbar Layout Adjustments ─────────────────────────────────────────── */
+
 .app-topbar {
   display: flex;
   align-items: center;
@@ -265,25 +268,57 @@
   color: var(--foreground); margin: 0;
 }
 .topbar-book { font-weight: 400; color: var(--muted-foreground); }
-.topbar-right { display: flex; align-items: center; gap: 10px; }
+.topbar-left {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.topbar-right { 
+  display: flex; 
+  align-items: center; 
+  gap: 10px; 
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.status-chip-wrapper {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
 
 .status-chip {
-  font-size: 0.72rem; font-family: ui-monospace, monospace;
+  font-size: 0.72rem; 
+  font-family: ui-monospace, monospace;
   padding: 4px 10px;
   background: var(--muted);
   border: 1px solid var(--border);
   border-radius: 20px;
   color: var(--muted-foreground);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; 
+  text-overflow: ellipsis; 
+  white-space: nowrap;
+  max-width: 100%;
+  display: inline-block;
 }
+
 .debug-btn {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 0.75rem; font-weight: 500;
+  display: flex; 
+  align-items: center; 
+  gap: 6px;
+  font-size: 0.75rem; 
+  font-weight: 500;
   color: var(--muted-foreground);
-  padding: 5px 10px; border-radius: 7px;
+  padding: 5px 10px; 
+  border-radius: 7px;
   border: 1px solid var(--border);
-  background: transparent; cursor: pointer;
+  background: transparent; 
+  cursor: pointer;
   transition: all 0.15s;
+  flex-shrink: 0; /* Prevents the buttons from shrinking when consoleMsg gets long */
+  white-space: nowrap;
 }
 .debug-btn:hover { background: var(--muted); color: var(--foreground); }
 
