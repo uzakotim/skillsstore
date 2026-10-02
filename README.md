@@ -102,4 +102,4 @@ If you need to reset the app, you can delete the `app.db` and vector index files
 
 ## 📜 License
 
-[MIT](LICENSE) - Developed with ❤️ by SkillsStore Team.
+[MIT](LICENSE) - Developed with ❤️
