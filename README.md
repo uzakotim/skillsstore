@@ -26,36 +26,42 @@
 
 Before you begin, ensure you have the following installed:
 
-1.  **Node.js & Yarn**: For the frontend and package management.
-2.  **Rust**: To build the Tauri backend.
-3.  **Ollama**: Running locally on your machine.
-    - Pull the required models:
-      ```bash
-      ollama pull gemma2:2b
-      ollama pull nomic-embed-text
-      ```
-4.  **macOS Specifics**: Install `libomp` to support Faiss (vector engine):
-    ```bash
-    brew install libomp
-    ```
+1. **Node.js & Yarn**: For frontend package management and build tools.
+2. **Rust**: To build the Tauri backend:
+   - **Windows**: Install Rust with the MSVC toolchain (`rustup-init.exe`) and Microsoft Visual C++ Build Tools (workload "Desktop development with C++").
+   - **macOS / Linux**: Install via `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`.
+3. **Ollama**: Running locally on your machine:
+   - **Windows**: Download and install the Windows installer from [ollama.com](https://ollama.com/download/windows).
+   - **macOS**: Download from [ollama.com](https://ollama.com/download/mac) or install via Homebrew (`brew install ollama`).
+   - Pull the required models:
+     ```bash
+     ollama pull gemma2:2b
+     ollama pull nomic-embed-text
+     ```
 
 ### Installation
 
-1.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/your-username/skillsstore.git
-    cd skillsstore
-    ```
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/your-username/skillsstore.git
+   cd skillsstore
+   ```
 
-2.  **Install dependencies**:
-    ```bash
-    yarn install
-    ```
+2. **Install dependencies**:
+   ```bash
+   yarn install
+   ```
 
-3.  **Run the application**:
-    ```bash
-    yarn tauri dev
-    ```
+3. **Run the application**:
+   ```bash
+   yarn tauri dev
+   ```
+
+4. **Build Windows Installer / Executable**:
+   ```bash
+   yarn tauri build
+   ```
+   The installer (`.exe` or `.msi`) will be generated in `src-tauri/target/release/bundle/nsis/`.
 
 ---
 
@@ -65,31 +71,32 @@ Before you begin, ensure you have the following installed:
 | :--- | :--- |
 | **Frontend** | React 19, TypeScript, Vite, Tailwind CSS 4, Jotai, Lucide Icons, Shadcn UI |
 | **Backend** | Rust, Tauri 2, Tokio, Anyhow |
-| **Storage** | SQLite (Metadata), Faiss (Vector Database) |
+| **Storage** | SQLite (Metadata), Pure-Rust Vector Engine (HNSW / L2 Euclidean) |
 | **AI/ML** | Ollama (Gemma 2:2b), Nomic Embeddings, PDF-Extract |
 
 ---
 
 ## 📖 How it Works
 
-1.  **Processing**: When you upload a PDF, the backend extracts the text using `pdf-extract`.
-2.  **Embedding**: The text is split into manageable chunks, and each chunk is converted into a vector representation using `nomic-embed-text`.
-3.  **Indexing**: These vectors are stored in a **Faiss** index for lightning-fast similarity searching.
-4.  **Retrieval**: When you search or ask a question, the system finds the most relevant "Knowledge Grains" from the index.
-5.  **Generation**: The retrieved context is sent to **Gemma 2** to synthesize a coherent, accurate response.
+1. **Processing**: When you upload a PDF, the backend extracts the text using `pdf-extract`.
+2. **Embedding**: The text is split into manageable chunks, and each chunk is converted into a vector representation using `nomic-embed-text`.
+3. **Indexing**: These vectors are stored in an indexed vector store for lightning-fast similarity searching.
+4. **Retrieval**: When you search or ask a question, the system finds the most relevant "Knowledge Grains" from the index.
+5. **Generation**: The retrieved context is sent to **Gemma 2** to synthesize a coherent, accurate response.
 
 ---
 
 ## 🤝 Troubleshooting
 
-### Faiss Build Error (macOS)
-If you encounter errors related to `faiss-sys` or OpenMP during build, ensure `libomp` is installed and linked correctly:
-```bash
-brew install libomp
-```
+### Ollama Not Detected
+Ensure Ollama is installed and accessible. On Windows, SkillsStore automatically searches `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`, `%ProgramFiles%\Ollama\ollama.exe`, and your system `%PATH%`. On macOS, it checks standard application and Homebrew directories.
 
-### Database Issues
-The app stores data in your system's local data directory. If you need to reset the app, you can delete the `storage` folder within the app's data path.
+### Database / Storage Reset
+The app stores data in your system's canonical app data directory:
+- **Windows**: `%APPDATA%\com.timuruzakov.skillsstore`
+- **macOS**: `~/Library/Application Support/com.timuruzakov.skillsstore`
+If you need to reset the app, you can delete the `app.db` and vector index files within that folder.
+
 
 ---
 

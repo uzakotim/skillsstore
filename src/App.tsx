@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight, RefreshCw } from "lucide-react";
+import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight } from "lucide-react";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { Modal, ModalHeader, ModalBody, ModalTitle } from "@/components/custom/Modal";
 import { listen } from "@tauri-apps/api/event";

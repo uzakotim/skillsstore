@@ -200,12 +200,30 @@ fn start_ollama(
     // Kill anything that was started outside this app.
     kill_existing_ollama();
     let ollama_path = find_ollama()?;
-    let mut child = Command::new(ollama_path)
-        .arg("serve")
-        .env("OLLAMA_HOST", "127.0.0.1:11434")
-        .env(
+    let mut cmd = Command::new(ollama_path);
+    cmd.arg("serve")
+        .env("OLLAMA_HOST", "127.0.0.1:11434");
+
+    #[cfg(target_os = "macos")]
+    {
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        cmd.env(
             "PATH",
-        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Applications/Ollama.app/Contents/Resources")
+            format!(
+                "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Applications/Ollama.app/Contents/Resources:{}",
+                current_path
+            ),
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
@@ -898,8 +916,15 @@ fn parse_prompt_processing_progress(line: &str) -> Option<(u64, u64)> {
 fn kill_existing_ollama() {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
         let _ = Command::new("taskkill")
             .args(["/F", "/IM", "ollama.exe", "/T"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        let _ = Command::new("taskkill")
+            .args(["/F", "/IM", "ollama app.exe", "/T"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
     }
 
@@ -919,19 +944,76 @@ fn kill_existing_ollama() {
 }
 
 fn find_ollama() -> Result<String, String> {
-    let candidates = [
-        "/Applications/Ollama.app/Contents/Resources/ollama",
-        "/usr/local/bin/ollama",
-        "/opt/homebrew/bin/ollama",
-    ];
+    #[cfg(target_os = "windows")]
+    {
+        // 1. Check user local appdata (standard Ollama Windows installer)
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let p = std::path::PathBuf::from(local_app_data)
+                .join("Programs")
+                .join("Ollama")
+                .join("ollama.exe");
+            if p.exists() {
+                return Ok(p.to_string_lossy().to_string());
+            }
+        }
 
-    for path in candidates {
-        if std::path::Path::new(path).exists() {
-            return Ok(path.to_string());
+        // 2. Check Program Files
+        if let Ok(program_files) = std::env::var("ProgramFiles") {
+            let p = std::path::PathBuf::from(program_files)
+                .join("Ollama")
+                .join("ollama.exe");
+            if p.exists() {
+                return Ok(p.to_string_lossy().to_string());
+            }
+        }
+
+        // 3. Check Program Files (x86)
+        if let Ok(program_files_x86) = std::env::var("ProgramFiles(x86)") {
+            let p = std::path::PathBuf::from(program_files_x86)
+                .join("Ollama")
+                .join("ollama.exe");
+            if p.exists() {
+                return Ok(p.to_string_lossy().to_string());
+            }
+        }
+
+        // 4. Search in PATH
+        if let Ok(path_var) = std::env::var("PATH") {
+            for dir in std::env::split_paths(&path_var) {
+                let candidate = dir.join("ollama.exe");
+                if candidate.exists() {
+                    return Ok(candidate.to_string_lossy().to_string());
+                }
+            }
         }
     }
 
-    Err("Could not find Ollama executable".to_string())
+    #[cfg(not(target_os = "windows"))]
+    {
+        let candidates = [
+            "/Applications/Ollama.app/Contents/Resources/ollama",
+            "/usr/local/bin/ollama",
+            "/opt/homebrew/bin/ollama",
+            "/usr/bin/ollama",
+        ];
+
+        for path in candidates {
+            if std::path::Path::new(path).exists() {
+                return Ok(path.to_string());
+            }
+        }
+
+        if let Ok(path_var) = std::env::var("PATH") {
+            for dir in std::env::split_paths(&path_var) {
+                let candidate = dir.join("ollama");
+                if candidate.exists() {
+                    return Ok(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    Err("Could not find Ollama executable. Please ensure Ollama is installed and running.".to_string())
 }
 // ─── App Setup ────────────────────────────────────────────────────────────────
 
