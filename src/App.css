@@ -139,7 +139,7 @@
   flex-direction: column;
   background: var(--card);
   border-right: 1px solid var(--border);
-  padding: 6px 14px 20px;
+  padding: 0 14px 20px;
   gap: 6px;
   position: relative;
   z-index: 10;
@@ -148,12 +148,14 @@
 .sidebar-logo {
   display: flex;
   align-items: center;
+  height: 56px;
   gap: 10px;
-  padding: 4px 6px 12px;
+  padding: 0 14px 0 20px;
   border-bottom: 1px solid var(--border);
   margin: 0 -14px 8px;
-  padding-left: 20px;
+  box-sizing: border-box;
 }
+
 .logo-icon {
   width: 36px; height: 36px;
   background: var(--primary);
@@ -247,12 +249,17 @@
 }
 
 .app-topbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 56px;
   border-bottom: 1px solid var(--border);
   background: var(--card);
   flex-shrink: 0;
+  box-sizing: border-box;
 }
+
 .topbar-title {
   font-size: 1rem; font-weight: 700;
   color: var(--foreground); margin: 0;
