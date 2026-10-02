@@ -132,61 +132,82 @@ function App() {
   const handleSaveDatabase = async () => {
     try {
       const path = await save({
-        title: "Save Database Backup",
-        defaultPath: "app-backup.db",
+        title: "Save Library Backup",
+        defaultPath: "library-backup.zip",
         filters: [
           {
-            name: "SQLite Database",
-            extensions: ["db", "sqlite", "sqlite3"],
+            name: "Library Backup",
+            extensions: ["zip"],
           },
         ],
       });
 
-      // User cancelled the dialog
       if (!path) {
         return;
       }
 
-      await invoke("save_database", {
+      await invoke("save_backup", {
         path,
       });
 
-      setConsoleMsg("Database saved successfully!");
+      setConsoleMsg("Library backup saved successfully!");
     } catch (error) {
-      setConsoleMsg(`Error saving database: ${error} `);
+      console.error("Save backup error:", error);
+
+      setConsoleMsg(
+        `Error saving backup: ${String(error)}`
+      );
     }
   };
-
-
   const handleLoadDatabase = async () => {
     try {
       const path = await open({
-        title: "Load Database Backup",
+        title: "Load Library Backup",
         multiple: false,
         directory: false,
         filters: [
           {
-            name: "SQLite Database",
-            extensions: ["db", "sqlite", "sqlite3"],
+            name: "Library Backup",
+            extensions: ["zip"],
           },
         ],
       });
 
-      // User cancelled the dialog
       if (!path || Array.isArray(path)) {
         return;
       }
 
-      await invoke("load_database", {
+      await invoke("load_backup", {
         path,
       });
 
-      setConsoleMsg("Database loaded successfully!");
+      setConsoleMsg("Library backup restored successfully!");
     } catch (error) {
-      setConsoleMsg(`Error loading database: ${error} `);
+      console.error("Load backup error:", error);
+
+      setConsoleMsg(
+        `Error loading backup: ${String(error)}`
+      );
     }
   };
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
 
+    const setupListener = async () => {
+      unlisten = await listen("backup-restored", async () => {
+        console.log("Backup restored - refreshing application data");
+        await fetchBooks();
+      });
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     checkOllamaStatus();

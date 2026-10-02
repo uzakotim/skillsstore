@@ -1,3 +1,4 @@
+mod backup;
 mod db;
 mod rag;
 // rag::embedder::embed is superseded by embed_with_model below
@@ -1238,6 +1239,9 @@ pub fn run() {
             load_database,
             // Ollama
             start_ollama,
+            // Backup / restore
+            backup::save_backup,
+            backup::load_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
