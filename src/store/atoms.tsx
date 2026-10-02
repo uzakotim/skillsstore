@@ -1,3 +1,3 @@
 import { atom } from "jotai";
 
-export const consoleMsgAtom = atom("Hello world");
+export const consoleMsgAtom = atom("Hello! This is a status message");

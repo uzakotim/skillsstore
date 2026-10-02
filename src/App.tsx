@@ -9,10 +9,11 @@ import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api/core";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight } from "lucide-react";
+import { Loader2Icon, Sparkles, BookOpen, GraduationCap, ArrowRight, Save, LoaderIcon, Upload, Download, DownloadIcon, UploadIcon } from "lucide-react";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { Modal, ModalHeader, ModalBody, ModalTitle } from "@/components/custom/Modal";
 import { listen } from "@tauri-apps/api/event";
+import { save, open } from "@tauri-apps/plugin-dialog";
 
 interface Chunk {
   id: number;
@@ -127,6 +128,66 @@ function App() {
       setOllamaStatus("offline");
     }
   };
+
+  const handleSaveDatabase = async () => {
+    try {
+      const path = await save({
+        title: "Save Database Backup",
+        defaultPath: "app-backup.db",
+        filters: [
+          {
+            name: "SQLite Database",
+            extensions: ["db", "sqlite", "sqlite3"],
+          },
+        ],
+      });
+
+      // User cancelled the dialog
+      if (!path) {
+        return;
+      }
+
+      await invoke("save_database", {
+        path,
+      });
+
+      setConsoleMsg("Database saved successfully!");
+    } catch (error) {
+      setConsoleMsg(`Error saving database: ${error} `);
+    }
+  };
+
+
+  const handleLoadDatabase = async () => {
+    try {
+      const path = await open({
+        title: "Load Database Backup",
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: "SQLite Database",
+            extensions: ["db", "sqlite", "sqlite3"],
+          },
+        ],
+      });
+
+      // User cancelled the dialog
+      if (!path || Array.isArray(path)) {
+        return;
+      }
+
+      await invoke("load_database", {
+        path,
+      });
+
+      setConsoleMsg("Database loaded successfully!");
+    } catch (error) {
+      setConsoleMsg(`Error loading database: ${error} `);
+    }
+  };
+
+
   useEffect(() => {
     checkOllamaStatus();
     const interval = setInterval(checkOllamaStatus, 5000);
@@ -205,7 +266,7 @@ function App() {
     try {
       const cleaned = learningPath
         .trim()
-        .replace(/^```(?:markdown)?\s*/i, "")
+        .replace(/^```(?: markdown) ?\s */i, "")
         .replace(/\s*```$/i, "")
         .trim();
 
@@ -535,7 +596,23 @@ function App() {
             </h1>
           </div>
           <div className="topbar-right">
-            <span className="status-chip w-[60hw]">{consoleMsg || "Ready"}</span>
+            <span className="status-chip max-w-[50hw]">{consoleMsg || "Ready"}</span>
+            <button
+              className="debug-btn"
+              onClick={handleSaveDatabase}
+              title="Save database"
+            >
+              <UploadIcon className="w-4 h-4" />
+              Save database
+            </button>
+            <button
+              className="debug-btn"
+              onClick={handleLoadDatabase}
+              title="Load database"
+            >
+              <DownloadIcon className="w-4 h-4" />
+              Load database
+            </button>
             <button
               className="debug-btn"
               onClick={handleGetChunks}
