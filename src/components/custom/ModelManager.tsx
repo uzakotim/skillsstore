@@ -31,23 +31,23 @@ interface ModelManagerProps {
 
 // Curated list of popular Ollama models
 const POPULAR_LLM_MODELS = [
-  { name: "gemma2:2b", desc: "Google Gemma 2 · 2B · Fast, lightweight", size: "1.6 GB" },
-  { name: "gemma2:9b", desc: "Google Gemma 2 · 9B · Balanced performance", size: "5.4 GB" },
+  {
+    name: "gemma4:e4b-mlx", desc: "Google Gemma 4 · 4B · Fast, lightweight, made for Apple Silicon", size: "8.2 GB"
+  },
+  {
+    name: "gemma4:e4b", desc: "Google Gemma 4 · 4B · Suitable for laptops", size: "6.6GB - 9.5 GB"
+  },
   { name: "llama3.2:3b", desc: "Meta Llama 3.2 · 3B · Fast & capable", size: "2.0 GB" },
   { name: "llama3.1:8b", desc: "Meta Llama 3.1 · 8B · Great reasoning", size: "4.7 GB" },
   { name: "mistral:7b", desc: "Mistral AI · 7B · Excellent instruction following", size: "4.1 GB" },
   { name: "phi3:mini", desc: "Microsoft Phi-3 · 3.8B · Small but smart", size: "2.2 GB" },
-  { name: "qwen2.5:7b", desc: "Alibaba Qwen 2.5 · 7B · Multilingual", size: "4.4 GB" },
-  { name: "deepseek-r1:7b", desc: "DeepSeek R1 · 7B · Strong reasoning", size: "4.7 GB" },
 ];
 
 const POPULAR_EMBED_MODELS = [
-  { name: "nomic-embed-text", desc: "Nomic · 768-dim · Best for RAG", size: "274 MB" },
-  { name: "mxbai-embed-large", desc: "MixedBread · 1024-dim · Higher accuracy", size: "670 MB" },
-  { name: "all-minilm", desc: "AllMiniLM · 384-dim · Ultra-fast", size: "46 MB" },
-  { name: "bge-large", desc: "BAAI BGE · 1024-dim · Top performance", size: "670 MB" },
-];
 
+  { name: "nomic-embed-text-v2-moe:latest", desc: "Nomic MoE · 768-dim · Best for RAG", size: "913 MB" },
+  { name: "mxbai-embed-large", desc: "MixedBread · 1024-dim · Higher accuracy", size: "670 MB" },
+]
 function formatSize(bytes?: number): string {
   if (!bytes) return "Unknown";
   const gb = bytes / 1_073_741_824;
@@ -59,7 +59,7 @@ function formatSize(bytes?: number): string {
 export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelManagerProps) {
   const setConsoleMsg = useSetAtom(consoleMsgAtom);
   const [localModels, setLocalModels] = useState<OllamaModel[]>([]);
-  const [config, setConfig] = useState<ModelConfig>({ llm_model: "gemma2:2b", embed_model: "nomic-embed-text" });
+  const [config, setConfig] = useState<ModelConfig>({ llm_model: "gemma4:e4b-mlx", embed_model: "nomic-embed-text-v2-moe:latest" });
   const [activeTab, setActiveTab] = useState<"llm" | "embed">("llm");
   const [pullingModel, setPullingModel] = useState<string | null>(null);
   const [pullProgress, setPullProgress] = useState<PullProgress | null>(null);
@@ -185,7 +185,7 @@ export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelM
     }
   };
 
-  const isInstalled = (name: string) => localModels.some(m => m.name === name || m.name.startsWith(name.split(":")[0]));
+  const isInstalled = (name: string) => localModels.some(m => m.name === name);
 
   if (!isOpen) return null;
 
