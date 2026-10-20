@@ -1,3 +1,4 @@
+import { LucideNotebook } from "lucide-react";
 import { useState } from "react";
 
 interface Book {
@@ -95,6 +96,9 @@ interface BookShelfProps {
   onDeleteBook: () => void;
   isUploading?: boolean;
   newBookId?: string | null;
+  hasExtractedConcepts?: boolean;
+  onExportNotes?: () => void;
+  isExporting?: boolean;
 }
 
 export default function BookShelf({
@@ -104,6 +108,9 @@ export default function BookShelf({
   onDeleteBook,
   isUploading = false,
   newBookId = null,
+  hasExtractedConcepts = false,
+  onExportNotes,
+  isExporting = false,
 }: BookShelfProps) {
   return (
     <div className="bookshelf-container">
@@ -156,9 +163,17 @@ export default function BookShelf({
           <span className="selected-book-name">
             📖 {books.find(b => b.id === selectedBookId)?.title}
           </span>
-          <button className="deselect-book-btn" onClick={() => onSelectBook("")} title="View all books">
-            All books
-          </button>
+          {hasExtractedConcepts && (
+            <button
+              className="export-notes-btn"
+              onClick={onExportNotes}
+              disabled={isExporting}
+              title="Export concepts as markdown notes for Notes app"
+            >
+              <LucideNotebook className="w-3 h-3" />
+              {isExporting ? "Exporting..." : "Export notes"}
+            </button>
+          )}
           <button className="delete-book-btn" onClick={onDeleteBook} title="Remove book from shelf">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />

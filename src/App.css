@@ -515,6 +515,49 @@
 .delete-book-btn { color: var(--destructive); }
 .delete-book-btn:hover { background: var(--destructive); color: white; border-color: var(--destructive); }
 
+/* Export notes button - warm yellow tint */
+.export-notes-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: rgba(234, 179, 8, 0.14);
+  border: 1px solid rgba(234, 179, 8, 0.42);
+  color: #854d0e;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.export-notes-btn:hover {
+  background: rgba(234, 179, 8, 0.25);
+  border-color: rgba(234, 179, 8, 0.65);
+  color: #713f12;
+  box-shadow: 0 1px 6px rgba(234, 179, 8, 0.2);
+  transform: translateY(-1px);
+}
+.export-notes-btn:active {
+  transform: translateY(0);
+}
+.export-notes-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+.dark .export-notes-btn {
+  background: rgba(234, 179, 8, 0.16);
+  border-color: rgba(250, 204, 21, 0.38);
+  color: #fde047;
+}
+.dark .export-notes-btn:hover {
+  background: rgba(234, 179, 8, 0.28);
+  border-color: rgba(250, 204, 21, 0.65);
+  color: #fef08a;
+  box-shadow: 0 1px 8px rgba(250, 204, 21, 0.2);
+}
+
 /* ─── Upload Button ───────────────────────────────────────────────────────── */
 .upload-book-btn {
   display: flex; align-items: center; gap: 8px;

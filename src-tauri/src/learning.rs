@@ -258,3 +258,98 @@ pub async fn get_stored_lessons(
     .map_err(|e| e.to_string())?;
     Ok(rows)
 }
+
+#[derive(serde::Deserialize)]
+pub struct NoteFile {
+    pub title: String,
+    pub content: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct ExportNotesResult {
+    pub count: usize,
+    pub folder_path: String,
+}
+
+#[tauri::command]
+pub async fn export_notes(
+    destination_dir: String,
+    book_title: String,
+    notes: Vec<NoteFile>,
+) -> Result<ExportNotesResult, String> {
+    if notes.is_empty() {
+        return Err("No notes to export".to_string());
+    }
+
+    let base_path = std::path::PathBuf::from(&destination_dir);
+    if !base_path.exists() {
+        return Err(format!("Destination directory does not exist: {}", destination_dir));
+    }
+
+    let sanitized_book_title = sanitize_filename(&book_title);
+    let subfolder_name = if sanitized_book_title.is_empty() {
+        "Book Notes".to_string()
+    } else {
+        format!("{} - Notes", sanitized_book_title)
+    };
+
+    // If base_path already ends with subfolder_name, write directly there
+    let target_dir = if base_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.eq_ignore_ascii_case(&subfolder_name))
+        .unwrap_or(false)
+    {
+        base_path
+    } else {
+        base_path.join(&subfolder_name)
+    };
+
+    std::fs::create_dir_all(&target_dir)
+        .map_err(|e| format!("Failed to create directory {:?}: {}", target_dir, e))?;
+
+    let mut written_count = 0;
+    let mut used_names = std::collections::HashSet::new();
+
+    for note in notes {
+        let base_name = sanitize_filename(&note.title);
+        let safe_title = if base_name.is_empty() {
+            "Untitled Concept".to_string()
+        } else {
+            base_name
+        };
+
+        let mut final_name = format!("{}.md", safe_title);
+        let mut counter = 1;
+        while used_names.contains(&final_name.to_lowercase()) {
+            final_name = format!("{} ({}).md", safe_title, counter);
+            counter += 1;
+        }
+        used_names.insert(final_name.to_lowercase());
+
+        let file_path = target_dir.join(&final_name);
+        std::fs::write(&file_path, note.content.as_bytes())
+            .map_err(|e| format!("Failed to write note {:?}: {}", file_path, e))?;
+
+        written_count += 1;
+    }
+
+    Ok(ExportNotesResult {
+        count: written_count,
+        folder_path: target_dir.to_string_lossy().to_string(),
+    })
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            other => other,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string()
+}
+

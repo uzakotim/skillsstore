@@ -55,6 +55,7 @@ function App() {
   const [modelConfig, setModelConfig] = useState<ModelConfig>({ llm_model: "gemma2:2b", embed_model: "nomic-embed-text" });
   const [showChunksPanel, setShowChunksPanel] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -203,16 +204,21 @@ function App() {
   }, [fetchBooks, fetchModelConfig]);
 
   useEffect(() => {
+    setLearningPath("");
+    setRelatedExcerpts([]);
+    setSelectedConcept("");
+    setLesson("");
+
+    if (!selectedBookId) {
+      return;
+    }
+
+    let cancelled = false;
+
     const loadStoredData = async () => {
-      if (!selectedBookId) {
-        setLearningPath("");
-        setRelatedExcerpts([]);
-        setSelectedConcept("");
-        setLesson("");
-        return;
-      }
       try {
         const storedPath = await invoke<string | null>("get_stored_learning_path", { bookId: selectedBookId });
+        if (cancelled) return;
         if (storedPath) {
           setLearningPath(storedPath);
         } else {
@@ -223,10 +229,16 @@ function App() {
         setLesson("");
         setLearnTab("concepts");
       } catch (error) {
-        console.error("Error loading stored data:", error);
+        if (!cancelled) {
+          console.error("Error loading stored data:", error);
+        }
       }
     };
     loadStoredData();
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedBookId]);
 
   useEffect(() => {
@@ -369,6 +381,90 @@ function App() {
       fetchBooks();
     } catch (error) {
       setConsoleMsg(`Error removing book: ${error}`);
+    }
+  };
+
+  const handleExportNotes = async () => {
+    if (!selectedBookId || parsedConcepts.length === 0) {
+      setConsoleMsg("No extracted concepts to export for this book.");
+      return;
+    }
+
+    const currentBook = books.find((b) => b.id === selectedBookId);
+    const bookTitle = currentBook?.title || "Book";
+
+    try {
+      const chosenPath = await open({
+        directory: true,
+        multiple: false,
+        title: `Select folder to export notes for "${bookTitle}"`,
+      });
+
+      if (!chosenPath || typeof chosenPath !== "string") {
+        return;
+      }
+
+      setIsExporting(true);
+      setConsoleMsg(`Exporting notes for "${bookTitle}"...`);
+
+      // Retrieve any cached/stored lessons for this book to enrich the notes if available
+      const lessonMap = new Map<string, string>();
+      try {
+        const storedLessons = await invoke<[string, string][]>("get_stored_lessons", {
+          bookId: selectedBookId,
+        });
+        if (Array.isArray(storedLessons)) {
+          for (const [cConcept, cLesson] of storedLessons) {
+            if (cConcept && cLesson) {
+              lessonMap.set(cConcept.trim().toLowerCase(), cLesson.trim());
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load stored lessons for export:", err);
+      }
+
+      // Format each concept as a .md file note suitable for Notes app
+      const notes = parsedConcepts.map((concept) => {
+        let md = `# ${concept.title}\n\n`;
+
+        if (concept.description) {
+          md += `${concept.description}\n\n`;
+        }
+
+        if (concept.excerpts && concept.excerpts.length > 0) {
+          md += `### Excerpts\n\n`;
+          md += concept.excerpts.map((e) => `* "${e}"`).join("\n\n");
+          md += `\n\n`;
+        }
+
+        const storedLesson = lessonMap.get(concept.title.trim().toLowerCase());
+        if (storedLesson) {
+          md += `### Detailed Lesson\n\n${storedLesson}\n\n`;
+        }
+
+        md += `---\n*Source: ${bookTitle}*\n`;
+
+        return {
+          title: concept.title,
+          content: md,
+        };
+      });
+
+      const result = await invoke<{ count: number; folder_path: string }>("export_notes", {
+        destinationDir: chosenPath,
+        bookTitle,
+        notes,
+      });
+
+      setConsoleMsg(
+        `Successfully exported ${result.count} note${result.count === 1 ? "" : "s"} to "${result.folder_path}". Ready for Notes app!`
+      );
+    } catch (error) {
+      console.error("Export notes error:", error);
+      setConsoleMsg(`Error exporting notes: ${String(error)}`);
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -547,6 +643,9 @@ function App() {
               onDeleteBook={handleDeleteBook}
               isUploading={isUploading}
               newBookId={newBookId}
+              hasExtractedConcepts={Boolean(selectedBookId && parsedConcepts.length > 0)}
+              onExportNotes={handleExportNotes}
+              isExporting={isExporting}
             />
             <UploadButton onUploadStart={handleUploadStart} onUpload={handleUploadDone} />
           </div>

@@ -13,7 +13,7 @@ pub use ollama::{ModelConfig, ModelConfigState, OllamaProcess};
 use books::{delete_book, get_books, get_chunks, search_context, upload_pdf};
 use database::{load_database, save_database};
 use learning::{
-    generate_learning_path, generate_lesson, generate_response, get_lesson,
+    export_notes, generate_learning_path, generate_lesson, generate_response, get_lesson,
     get_stored_learning_path, get_stored_lessons,
 };
 use ollama::{
@@ -83,6 +83,7 @@ pub fn run() {
             generate_lesson,
             get_stored_learning_path,
             get_stored_lessons,
+            export_notes,
             // Model management
             list_local_models,
             delete_ollama_model,
