@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useSetAtom } from "jotai";
 import { consoleMsgAtom } from "@/store/atoms";
-import { Book, BookA, BookCopy } from "lucide-react";
+import { BookCopy } from "lucide-react";
 
 interface UploadButtonProps {
   onUploadStart?: () => void;
