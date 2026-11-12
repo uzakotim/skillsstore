@@ -275,10 +275,17 @@ pub fn parse_prompt_processing_progress(line: &str) -> Option<(u64, u64)> {
 // ─── Ollama HTTP API Helpers ──────────────────────────────────────────────────
 
 #[derive(Serialize)]
+pub struct OllamaOptions {
+    pub temperature: f32,
+}
+
+#[derive(Serialize)]
 pub struct OllamaGenerateRequest {
     pub model: String,
     pub prompt: String,
     pub stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options: Option<OllamaOptions>,
 }
 
 #[derive(Deserialize)]
@@ -294,6 +301,7 @@ pub async fn call_ollama(model: &str, prompt: String) -> Result<String, String> 
             model: model.to_string(),
             prompt,
             stream: false,
+            options: Some(OllamaOptions { temperature: 0.1 }),
         })
         .send()
         .await
@@ -553,3 +561,18 @@ pub async fn set_model_config(
     state.save();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires local Ollama instance with gemma4:e4b-mlx"]
+    async fn test_call_ollama_gemma() {
+        let prompt = "Respond with 'Hello, world!' and nothing else.".to_string();
+        let res = call_ollama("gemma4:e4b-mlx", prompt).await;
+        println!("\n--- Ollama Response ---\n{:?}\n-----------------------", res);
+        assert!(res.is_ok());
+    }
+}
+
