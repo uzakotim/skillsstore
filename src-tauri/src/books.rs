@@ -1,3 +1,4 @@
+use crate::convert_pdf_to_markdown;
 use crate::ollama::{embed_with_model, ModelConfigState};
 use crate::rag::faiss::VectorIndex;
 use serde::Serialize;
@@ -58,19 +59,23 @@ pub async fn upload_pdf(
         .to_string_lossy()
         .to_string();
 
-    sqlx::query("INSERT INTO books (id, title, file_path) VALUES (?, ?, ?)")
-        .bind(book_id.clone())
-        .bind(title)
-        .bind(path.clone())
-        .execute(pool.inner())
+    // let text = pdf_extract::extract_text(&path).map_err(|e| e.to_string())?;
+
+    let text = convert_pdf_to_markdown(path.clone())
         .await
         .map_err(|e| e.to_string())?;
-
-    let text = pdf_extract::extract_text(&path).map_err(|e| e.to_string())?;
 
     if text.trim().is_empty() {
         return Err("No text extracted. PDF might be scanned/image-only.".into());
     }
+
+    sqlx::query("INSERT INTO books (id, title, file_path) VALUES (?, ?, ?)")
+        .bind(book_id.clone())
+        .bind(title)
+        .bind(path)
+        .execute(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
 
     let chunks = chunk_with_overlap(&text, 250, 50);
 
@@ -179,7 +184,10 @@ pub async fn get_books(pool: tauri::State<'_, SqlitePool>) -> Result<Vec<Book>, 
 }
 
 #[tauri::command]
-pub async fn delete_book(book_id: String, pool: tauri::State<'_, SqlitePool>) -> Result<(), String> {
+pub async fn delete_book(
+    book_id: String,
+    pool: tauri::State<'_, SqlitePool>,
+) -> Result<(), String> {
     sqlx::query("DELETE FROM chunks WHERE book_id = ?")
         .bind(&book_id)
         .execute(pool.inner())

@@ -1,6 +1,7 @@
 pub mod backup;
 pub mod books;
 pub mod database;
+pub mod dockling;
 pub mod learning;
 pub mod ollama;
 pub mod rag;
@@ -8,6 +9,7 @@ pub mod sqlx_db;
 
 // Re-exports for backup.rs and external consumers
 pub use books::AppStorage;
+pub use dockling::{convert_pdf_to_markdown, start_dockling, DocklingProcess};
 pub use ollama::{ModelConfig, ModelConfigState, OllamaProcess};
 
 use books::{delete_book, get_books, get_chunks, search_context, upload_pdf};
@@ -67,6 +69,9 @@ pub fn run() {
                 eprintln!("Failed to start Ollama: {}", e);
             }
 
+            app.manage(DocklingProcess::new());
+            start_dockling(app.handle().clone());
+
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -98,6 +103,8 @@ pub fn run() {
             // Backup / restore
             backup::save_backup,
             backup::load_backup,
+            // Dockling
+            convert_pdf_to_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

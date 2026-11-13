@@ -23,3 +23,14 @@ dist-ssr
 *.sln
 *.sw?
 storage/
+*.venv
+
+# Dockling backend build artifacts
+dockling_backend/.venv/
+dockling_backend/dist/
+dockling_backend/build/
+dockling_backend/__pycache__/
+dockling_backend/*.spec
+
+# Tauri sidecar binaries (built locally, not committed)
+src-tauri/binaries/
