@@ -1,6 +1,7 @@
 use crate::convert_pdf_to_markdown;
 use crate::ollama::{embed_with_model, ModelConfigState};
 use crate::rag::faiss::VectorIndex;
+use regex::Regex;
 use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
 
@@ -45,6 +46,21 @@ pub fn chunk_with_overlap(text: &str, size: usize, overlap: usize) -> Vec<String
     chunks
 }
 
+fn clear_markdown_formatting(markdown: &str) -> String {
+    // 1. Remove ***, ###, and multi-line code blocks inside ``` ```
+    let md_re = Regex::new(r"(?s)\*\*\*|###|```.*?```").unwrap();
+    let cleaned = md_re.replace_all(markdown, "");
+
+    // 2. Remove clusters of 3 or more 1-to-2 letter gibberish tokens in a row
+    // e.g., matches "s d s se" or "s s s s a e" without deleting normal words like "is a"
+    let gibberish_re = Regex::new(r"\b[a-zA-Z]{1,2}(?:\s+[a-zA-Z]{1,2}){2,}\b").unwrap();
+    let cleaned = gibberish_re.replace_all(&cleaned, "");
+
+    // 3. Clean up any double spaces left behind
+    let space_re = Regex::new(r" {2,}").unwrap();
+    space_re.replace_all(cleaned.trim(), " ").to_string()
+}
+
 #[tauri::command]
 pub async fn upload_pdf(
     path: String,
@@ -64,6 +80,8 @@ pub async fn upload_pdf(
     let text = convert_pdf_to_markdown(path.clone())
         .await
         .map_err(|e| e.to_string())?;
+
+    let text = clear_markdown_formatting(&text);
 
     if text.trim().is_empty() {
         return Err("No text extracted. PDF might be scanned/image-only.".into());
@@ -124,13 +142,11 @@ pub async fn search_context(
 
     // 1. Fetch chunks belonging to the targeted book (or all chunks if no book selected)
     let chunks: Vec<(i64, String)> = if let Some(ref bid) = book_id {
-        sqlx::query_as::<_, (i64, String)>(
-            "SELECT faiss_id, content FROM chunks WHERE book_id = ?",
-        )
-        .bind(bid)
-        .fetch_all(pool.inner())
-        .await
-        .map_err(|e| e.to_string())?
+        sqlx::query_as::<_, (i64, String)>("SELECT faiss_id, content FROM chunks WHERE book_id = ?")
+            .bind(bid)
+            .fetch_all(pool.inner())
+            .await
+            .map_err(|e| e.to_string())?
     } else {
         sqlx::query_as::<_, (i64, String)>("SELECT faiss_id, content FROM chunks")
             .fetch_all(pool.inner())
@@ -348,24 +364,54 @@ mod tests {
         index.save(temp_dir.join("faiss.index").to_str().unwrap());
 
         // Insert chunks for Book 1
-        sqlx::query("INSERT INTO chunks (book_id, chunk_index, content, faiss_id) VALUES (?, ?, ?, ?)")
-            .bind("book_1").bind(0).bind("chunk 0").bind(0)
-            .execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO chunks (book_id, chunk_index, content, faiss_id) VALUES (?, ?, ?, ?)")
-            .bind("book_1").bind(1).bind("chunk 1").bind(1)
-            .execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO chunks (book_id, chunk_index, content, faiss_id) VALUES (?, ?, ?, ?)",
+        )
+        .bind("book_1")
+        .bind(0)
+        .bind("chunk 0")
+        .bind(0)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO chunks (book_id, chunk_index, content, faiss_id) VALUES (?, ?, ?, ?)",
+        )
+        .bind("book_1")
+        .bind(1)
+        .bind("chunk 1")
+        .bind(1)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         // Insert chunks for Book 2
-        sqlx::query("INSERT INTO chunks (book_id, chunk_index, content, faiss_id) VALUES (?, ?, ?, ?)")
-            .bind("book_2").bind(0).bind("chunk 2").bind(2)
-            .execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO chunks (book_id, chunk_index, content, faiss_id) VALUES (?, ?, ?, ?)")
-            .bind("book_2").bind(1).bind("chunk 3").bind(3)
-            .execute(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO chunks (book_id, chunk_index, content, faiss_id) VALUES (?, ?, ?, ?)",
+        )
+        .bind("book_2")
+        .bind(0)
+        .bind("chunk 2")
+        .bind(2)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO chunks (book_id, chunk_index, content, faiss_id) VALUES (?, ?, ?, ?)",
+        )
+        .bind("book_2")
+        .bind(1)
+        .bind("chunk 3")
+        .bind(3)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         // Delete Book 1 from SQLite
         sqlx::query("DELETE FROM chunks WHERE book_id = 'book_1'")
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
 
         // Purge ghost vectors
         purge_ghost_vectors(&pool, &temp_dir).await.unwrap();
@@ -375,10 +421,11 @@ mod tests {
         assert_eq!(loaded_index.ntotal(), 2);
 
         // Check that Book 2 chunks now have faiss_id 0 and 1 in SQLite
-        let remaining: Vec<(i32, i64, String)> = sqlx::query_as("SELECT id, faiss_id, content FROM chunks ORDER BY id ASC")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let remaining: Vec<(i32, i64, String)> =
+            sqlx::query_as("SELECT id, faiss_id, content FROM chunks ORDER BY id ASC")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
 
         assert_eq!(remaining.len(), 2);
         assert_eq!(remaining[0].1, 0); // new faiss_id for chunk 2

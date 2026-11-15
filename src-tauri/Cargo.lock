@@ -4015,6 +4015,7 @@ dependencies = [
  "dirs 5.0.1",
  "futures-util",
  "pdf-extract",
+ "regex",
  "reqwest 0.11.27",
  "serde",
  "serde_json",

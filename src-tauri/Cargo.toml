@@ -32,5 +32,7 @@ tokio = { version = "1", features = ["full"] }
 dirs = "5"
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "macros"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+regex = "1.13.1"
 [profile.release]
 strip = false
+regex = "1"
