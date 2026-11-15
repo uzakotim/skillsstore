@@ -56,6 +56,9 @@ pub fn run() {
                     panic!("failed to initialize database at {:?}: {}", db_path, e)
                 });
 
+            // Automatically clean up any orphaned/ghost vectors from previously deleted books
+            let _ = tauri::async_runtime::block_on(books::purge_ghost_vectors(&pool, &app_data_dir));
+
             // Load ModelConfigState using canonical app_data_dir
             let model_config = ModelConfigState::load(&app_data_dir);
 

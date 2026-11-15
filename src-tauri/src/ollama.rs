@@ -314,25 +314,28 @@ pub async fn embed_with_model(text: &str, model: &str) -> Result<Vec<f32>, Strin
     #[derive(serde::Serialize)]
     struct EmbedReq<'a> {
         model: &'a str,
-        prompt: &'a str,
+        input: &'a str,
     }
     #[derive(serde::Deserialize)]
     struct EmbedResp {
-        embedding: Vec<f32>,
+        embeddings: Vec<Vec<f32>>,
     }
 
     let client = reqwest::Client::new();
     let res = client
-        .post("http://localhost:11434/api/embeddings")
+        .post("http://localhost:11434/api/embed")
         .json(&EmbedReq {
             model,
-            prompt: text,
+            input: text,
         })
         .send()
         .await
         .map_err(|e| e.to_string())?;
     let body: EmbedResp = res.json().await.map_err(|e| e.to_string())?;
-    Ok(body.embedding)
+    body.embeddings
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Ollama returned empty embeddings".to_string())
 }
 
 // ─── Ollama Tauri Commands ────────────────────────────────────────────────────

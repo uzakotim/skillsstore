@@ -17,6 +17,9 @@ impl VectorIndex {
     }
 
     pub fn add(&mut self, vector: &[f32]) {
+        if self.vectors.is_empty() {
+            self.dimension = vector.len() as u32;
+        }
         if vector.len() == self.dimension as usize {
             self.vectors.push(vector.to_vec());
         } else {
@@ -28,17 +31,32 @@ impl VectorIndex {
         }
     }
 
-    pub fn search(&mut self, query: &[f32], k: usize) -> Vec<u64> {
-        if self.vectors.is_empty() || query.len() != self.dimension as usize {
+    pub fn search_with_candidates(
+        &self,
+        query: &[f32],
+        candidate_ids: &[u64],
+        k: usize,
+    ) -> Vec<u64> {
+        if self.vectors.is_empty() {
+            eprintln!("VectorIndex search: index has no vectors");
+            return Vec::new();
+        }
+        if query.len() != self.dimension as usize {
+            eprintln!(
+                "VectorIndex search: dimension mismatch (query dimension: {}, index dimension: {})",
+                query.len(),
+                self.dimension
+            );
             return Vec::new();
         }
 
-        // Calculate squared Euclidean (L2) distance to each vector
-        let mut scored: Vec<(u64, f32)> = self
-            .vectors
+        let mut scored: Vec<(u64, f32)> = candidate_ids
             .iter()
-            .enumerate()
-            .map(|(idx, vec)| {
+            .filter_map(|&id| {
+                let vec = self.vectors.get(id as usize)?;
+                if vec.len() != self.dimension as usize {
+                    return None;
+                }
                 let dist: f32 = query
                     .iter()
                     .zip(vec.iter())
@@ -47,7 +65,7 @@ impl VectorIndex {
                         diff * diff
                     })
                     .sum();
-                (idx as u64, dist)
+                Some((id, dist))
             })
             .collect();
 
@@ -55,6 +73,11 @@ impl VectorIndex {
         scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         scored.into_iter().take(k).map(|(id, _)| id).collect()
+    }
+
+    pub fn search(&self, query: &[f32], k: usize) -> Vec<u64> {
+        let all_ids: Vec<u64> = (0..self.vectors.len() as u64).collect();
+        self.search_with_candidates(query, &all_ids, k)
     }
 
     pub fn save(&self, path: &str) {
@@ -122,6 +145,18 @@ impl VectorIndex {
     pub fn ntotal(&self) -> u64 {
         self.vectors.len() as u64
     }
+
+    pub fn get_vector(&self, id: usize) -> Option<&Vec<f32>> {
+        self.vectors.get(id)
+    }
+
+    pub fn set_vectors(&mut self, vectors: Vec<Vec<f32>>) {
+        self.vectors = vectors;
+    }
+
+    pub fn clear(&mut self) {
+        self.vectors.clear();
+    }
 }
 
 #[cfg(test)]
@@ -154,6 +189,26 @@ mod tests {
         assert_eq!(loaded.dimension, 3);
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_vector_index_search_with_candidates() {
+        let mut index = VectorIndex::new(3);
+        index.add(&[1.0, 0.0, 0.0]); // id 0 (Book A)
+        index.add(&[0.9, 0.1, 0.0]); // id 1 (Book A)
+        index.add(&[0.0, 1.0, 0.0]); // id 2 (Book B)
+        index.add(&[0.0, 0.9, 0.1]); // id 3 (Book B)
+
+        // Query close to id 0 and 1
+        let query = [0.95, 0.05, 0.0];
+
+        // Global search returns id 0 and 1
+        let global_results = index.search(&query, 2);
+        assert_eq!(global_results, vec![0, 1]);
+
+        // Filtered search restricted to Book B (candidates 2 and 3)
+        let filtered_results = index.search_with_candidates(&query, &[2, 3], 2);
+        assert_eq!(filtered_results, vec![3, 2]);
     }
 }
 
