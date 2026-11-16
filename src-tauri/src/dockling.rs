@@ -29,11 +29,11 @@ pub fn start_dockling(app: tauri::AppHandle) {
             return;
         }
 
-        let venv_python = backend_dir.join(".venv").join("bin").join("python");
+        let venv_python = backend_dir.join(".venv").join("bin").join("python3.10");
         let python = if venv_python.is_file() {
             venv_python
         } else {
-            std::path::PathBuf::from("python3")
+            std::path::PathBuf::from("python3.10")
         };
 
         println!("[Dockling] Starting {}", script.display());

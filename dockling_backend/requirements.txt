@@ -2,3 +2,4 @@ docling
 fastapi
 uvicorn[standard]
 pydantic
+pyinstaller
