@@ -479,22 +479,22 @@ function App() {
     }
   };
 
-  const handleSearch = async () => {
-    try {
-      if (!searchQuery) {
-        setConsoleMsg("Please enter a search query");
-        return;
-      }
-      const results = await invoke<string[]>("search_context", {
-        query: searchQuery,
-        bookId: selectedBookId || null,
-      });
-      setSearchResults(results);
-      setConsoleMsg(`Found ${results.length} relevant passages${selectedBookId ? " (filtered by book)" : ""}`);
-    } catch (error) {
-      setConsoleMsg(`Search error: ${error}`);
-    }
-  };
+  // const handleSearch = async () => {
+  //   try {
+  //     if (!searchQuery) {
+  //       setConsoleMsg("Please enter a search query");
+  //       return;
+  //     }
+  //     const results = await invoke<string[]>("search_context", {
+  //       query: searchQuery,
+  //       bookId: selectedBookId || null,
+  //     });
+  //     setSearchResults(results);
+  //     setConsoleMsg(`Found ${results.length} relevant passages${selectedBookId ? " (filtered by book)" : ""}`);
+  //   } catch (error) {
+  //     setConsoleMsg(`Search error: ${error}`);
+  //   }
+  // };
 
   // Helper to call your Python FastAPI prompt enhancer sidecar
   const handleEnhancedSearch = async () => {
