@@ -166,7 +166,7 @@ pub async fn search_context(
     // 2. Perform vector search scoped specifically to the candidate chunks
     if let Ok(query_embedding) = embed_with_model(&query, &embed_model).await {
         let index = load_or_create_faiss(&storage.dir);
-        let ids = index.search_with_candidates(&query_embedding, &candidate_ids, 5);
+        let ids = index.search_with_candidates(&query_embedding, &candidate_ids, 20);
         for id in ids {
             if let Some(content) = chunk_map.get(&(id as i64)) {
                 results.push(content.clone());

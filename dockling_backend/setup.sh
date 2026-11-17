@@ -6,6 +6,8 @@ python3.10 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
 source .venv/bin/activate
+python3.10 -m spacy download en_core_web_sm
+python3.10 -c "import nltk; nltk.download('wordnet'); nltk.download('omw-1.4'); nltk.download('stopwords'); nltk.download('punkt')"
 pyinstaller --onefile --name dockling main.py
 mv ./dist/dockling ../src-tauri/binaries/dockling-aarch64-apple-darwin
 chmod +x ../src-tauri/binaries/dockling-aarch64-apple-darwin

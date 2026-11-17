@@ -496,6 +496,57 @@ function App() {
     }
   };
 
+  // Helper to call your Python FastAPI prompt enhancer sidecar
+  const handleEnhancedSearch = async () => {
+    if (!searchQuery.trim()) {
+      setConsoleMsg("Please enter a search query");
+      return;
+    }
+
+    let queryToUse = searchQuery;
+
+    try {
+      setConsoleMsg("Enhancing prompt with synonyms...");
+      const response = await fetch("http://127.0.0.1:48484/enhance-prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: searchQuery,
+          max_synonyms_per_word: 2,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      queryToUse = data.enhanced_prompt;
+
+      // Optionally update the input field so the user sees the enhanced version
+      setSearchQuery(queryToUse);
+      setConsoleMsg(`Enhanced query: "${queryToUse}"`);
+    } catch (error) {
+      console.warn("Prompt enhancement sidecar unavailable, falling back to original query:", error);
+      setConsoleMsg("Enhancer offline. Using original query...");
+    }
+
+    // Now proceed with your existing search flow using queryToUse
+    try {
+      const results = await invoke<string[]>("search_context", {
+        query: queryToUse,
+        bookId: selectedBookId || null,
+      });
+      setSearchResults(results);
+      // setConsoleMsg(`Found ${results.length} relevant passages${selectedBookId ? " (filtered by book)" : ""}`);
+    } catch (error) {
+      setConsoleMsg(`Search error: ${error}`);
+    }
+  };
+
   const handleGenerate = async () => {
     if (searchResults.length === 0) {
       setConsoleMsg("Search first to provide context for the AI");
@@ -658,7 +709,7 @@ function App() {
               selectedBook={selectedBook}
               searchQuery={searchQuery}
               onSearchQueryChange={setSearchQuery}
-              onSearch={handleSearch}
+              onSearch={handleEnhancedSearch}
               onGenerate={handleGenerate}
               isGenerating={isGenerating}
               searchResults={searchResults}
