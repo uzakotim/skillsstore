@@ -31,6 +31,157 @@ pub fn load_or_create_faiss(storage_dir: &std::path::Path) -> VectorIndex {
         VectorIndex::new(768) // nomic-embed-text dimension
     }
 }
+use reqwest::Client;
+use serde::Deserialize;
+
+#[derive(Serialize)]
+struct OllamaEmbedRequest<'a> {
+    model: &'a str,
+    input: &'a [String],
+}
+
+#[derive(Deserialize)]
+struct OllamaEmbedResponse {
+    embeddings: Vec<Vec<f32>>,
+}
+
+fn split_sentences(text: &str) -> Vec<&str> {
+    let mut sentences = Vec::new();
+    let mut start = 0;
+
+    for (idx, ch) in text.char_indices() {
+        if matches!(ch, '.' | '!' | '?') {
+            let next_idx = idx + ch.len_utf8();
+            let rest = &text[next_idx..];
+            if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+                let s = text[start..next_idx].trim();
+                if !s.is_empty() {
+                    sentences.push(s);
+                }
+                start = next_idx + (rest.len() - rest.trim_start().len());
+            }
+        }
+    }
+
+    let tail = text[start..].trim();
+    if !tail.is_empty() {
+        sentences.push(tail);
+    }
+    sentences
+}
+
+fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 1.0;
+    }
+    1.0 - (dot / (norm_a * norm_b))
+}
+
+fn percentile_threshold(distances: &[f32], percentile: f32) -> f32 {
+    if distances.is_empty() {
+        return 1.0;
+    }
+    let mut sorted = distances.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+
+    let clamped = percentile.clamp(0.0, 100.0);
+    let idx =
+        (((clamped / 100.0) * (sorted.len() - 1) as f32).round() as usize).min(sorted.len() - 1);
+    sorted[idx]
+}
+
+fn split_long_chunk(text: &str, max_words: usize) -> Vec<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() <= max_words || max_words == 0 {
+        return vec![text.to_string()];
+    }
+    words.chunks(max_words).map(|w| w.join(" ")).collect()
+}
+
+/// Semantic chunking backed by local Ollama (`nomic-embed-text`).
+///
+/// Recommended defaults:
+/// - `buffer_size`: `1` (1 sentence before + 1 after)
+/// - `percentile`: `90.0` (splits on top 10% topic shifts)
+/// - `max_words`: `350` (keeps chunks well inside nomic-embed-text's token window)
+pub async fn semantic_chunk_ollama(
+    client: &Client,
+    text: &str,
+    buffer_size: usize,
+    percentile: f32,
+    max_words: usize,
+    embed_model: &str,
+) -> Result<Vec<String>, reqwest::Error> {
+    let sentences = split_sentences(text);
+    if sentences.is_empty() {
+        return Ok(Vec::new());
+    }
+    if sentences.len() == 1 {
+        return Ok(split_long_chunk(sentences[0], max_words));
+    }
+
+    // 1. Build sliding windows with nomic document prefix
+    let windows: Vec<String> = (0..sentences.len())
+        .map(|i| {
+            let start = i.saturating_sub(buffer_size);
+            let end = usize::min(i + buffer_size + 1, sentences.len());
+            format!("search_document: {}", sentences[start..end].join(" "))
+        })
+        .collect();
+
+    // 2. Batch-embed all windows in one local Ollama request (chunked in batches of 64)
+    let mut embeddings = Vec::with_capacity(windows.len());
+    for batch in windows.chunks(64) {
+        let resp = client
+            .post("http://localhost:11434/api/embed")
+            .json(&OllamaEmbedRequest {
+                model: embed_model,
+                input: batch,
+            })
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<OllamaEmbedResponse>()
+            .await?;
+        embeddings.extend(resp.embeddings);
+    }
+
+    // 3. Adjacent cosine distances & percentile breakpoint
+    let distances: Vec<f32> = embeddings
+        .windows(2)
+        .map(|pair| cosine_distance(&pair[0], &pair[1]))
+        .collect();
+    let threshold = percentile_threshold(&distances, percentile);
+
+    // 4. Group sentences & enforce max_words cap
+    let mut chunks = Vec::new();
+    let mut current: Vec<&str> = vec![sentences[0]];
+    let mut current_words = sentences[0].split_whitespace().count();
+
+    for (i, &dist) in distances.iter().enumerate() {
+        let next_sentence = sentences[i + 1];
+        let next_words = next_sentence.split_whitespace().count();
+
+        if dist >= threshold || (max_words > 0 && current_words + next_words > max_words) {
+            chunks.extend(split_long_chunk(&current.join(" "), max_words));
+            current = vec![next_sentence];
+            current_words = next_words;
+        } else {
+            current.push(next_sentence);
+            current_words += next_words;
+        }
+    }
+
+    if !current.is_empty() {
+        chunks.extend(split_long_chunk(&current.join(" "), max_words));
+    }
+
+    Ok(chunks)
+}
 
 pub fn chunk_with_overlap(text: &str, size: usize, overlap: usize) -> Vec<String> {
     let words: Vec<&str> = text.split_whitespace().collect();
@@ -95,12 +246,15 @@ pub async fn upload_pdf(
         .await
         .map_err(|e| e.to_string())?;
 
-    let chunks = chunk_with_overlap(&text, 250, 50);
-
     let embed_model = {
         let cfg = model_config.config.lock().unwrap();
         cfg.embed_model.clone()
     };
+
+    let client = Client::new();
+    let chunks = semantic_chunk_ollama(&client, &text, 1, 90.0, 350, &embed_model)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let mut index = load_or_create_faiss(&storage.dir);
 
