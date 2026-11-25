@@ -35,4 +35,3 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 regex = "1.13.1"
 [profile.release]
 strip = false
-regex = "1"
