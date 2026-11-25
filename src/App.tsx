@@ -52,7 +52,7 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [newBookId, setNewBookId] = useState<string | null>(null);
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
-  const [modelConfig, setModelConfig] = useState<ModelConfig>({ llm_model: "gemma2:2b", embed_model: "nomic-embed-text" });
+  const [modelConfig, setModelConfig] = useState<ModelConfig>({ llm_model: "", embed_model: "" });
   const [showChunksPanel, setShowChunksPanel] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -105,8 +105,25 @@ function App() {
 
   const checkOllamaStatus = async () => {
     try {
-      await invoke<OllamaModel[]>("list_local_models");
+      const models = await invoke<OllamaModel[]>("list_local_models");
       setOllamaStatus("online");
+
+      const normalize = (n: string) => (n.endsWith(":latest") ? n.slice(0, -7) : n);
+      const isModelInstalled = (name: string) => {
+        if (!name) return false;
+        const norm = normalize(name);
+        return models.some((m) => m.name === name || normalize(m.name) === norm);
+      };
+
+      setModelConfig((prev) => {
+        const validLlm = isModelInstalled(prev.llm_model) ? prev.llm_model : "";
+        const validEmbed = isModelInstalled(prev.embed_model) ? prev.embed_model : "";
+        if (validLlm !== prev.llm_model || validEmbed !== prev.embed_model) {
+          invoke("set_model_config", { llmModel: validLlm, embedModel: validEmbed }).catch(() => {});
+          return { llm_model: validLlm, embed_model: validEmbed };
+        }
+        return prev;
+      });
     } catch {
       setOllamaStatus("offline");
     }

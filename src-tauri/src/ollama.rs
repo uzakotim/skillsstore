@@ -80,22 +80,22 @@ impl ModelConfigState {
                         path, e
                     );
                     ModelConfig {
-                        llm_model: "gemma2:2b".to_string(),
-                        embed_model: "nomic-embed-text".to_string(),
+                        llm_model: String::new(),
+                        embed_model: String::new(),
                     }
                 }),
                 Err(e) => {
                     eprintln!("Failed to read model_config.json at {:?}: {}", path, e);
                     ModelConfig {
-                        llm_model: "gemma2:2b".to_string(),
-                        embed_model: "nomic-embed-text".to_string(),
+                        llm_model: String::new(),
+                        embed_model: String::new(),
                     }
                 }
             }
         } else {
             let default_cfg = ModelConfig {
-                llm_model: "gemma2:2b".to_string(),
-                embed_model: "nomic-embed-text".to_string(),
+                llm_model: String::new(),
+                embed_model: String::new(),
             };
             // Persist the default configuration immediately so the file exists
             if let Ok(json) = serde_json::to_string_pretty(&default_cfg) {
@@ -294,6 +294,9 @@ pub struct OllamaGenerateResponse {
 }
 
 pub async fn call_ollama(model: &str, prompt: String) -> Result<String, String> {
+    if model.trim().is_empty() {
+        return Err("No LLM model selected. Please select a model in Model Manager.".to_string());
+    }
     let client = reqwest::Client::new();
     let res = client
         .post("http://localhost:11434/api/generate")
@@ -311,6 +314,9 @@ pub async fn call_ollama(model: &str, prompt: String) -> Result<String, String> 
 }
 
 pub async fn embed_with_model(text: &str, model: &str) -> Result<Vec<f32>, String> {
+    if model.trim().is_empty() {
+        return Err("No embedding model selected. Please select a model in Model Manager.".to_string());
+    }
     #[derive(serde::Serialize)]
     struct EmbedReq<'a> {
         model: &'a str,

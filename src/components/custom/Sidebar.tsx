@@ -72,11 +72,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       >
         <div className="model-config-row">
           <span className="model-config-label">LLM</span>
-          <span className="model-config-val">{modelConfig.llm_model}</span>
+          <span className="model-config-val">{modelConfig.llm_model || "None"}</span>
         </div>
         <div className="model-config-row">
           <span className="model-config-label">Embed</span>
-          <span className="model-config-val">{modelConfig.embed_model}</span>
+          <span className="model-config-val">{modelConfig.embed_model || "None"}</span>
         </div>
         <div className="model-config-hint">
           <svg

@@ -48,6 +48,11 @@ const POPULAR_EMBED_MODELS = [
   { name: "nomic-embed-text-v2-moe:latest", desc: "Nomic MoE · 768-dim · Best for RAG", size: "913 MB" },
   { name: "mxbai-embed-large", desc: "MixedBread · 1024-dim · Higher accuracy", size: "670 MB" },
 ]
+function normalizeModelName(name?: string): string {
+  if (!name) return "";
+  return name.endsWith(":latest") ? name.slice(0, -7) : name;
+}
+
 function formatSize(bytes?: number): string {
   if (!bytes) return "Unknown";
   const gb = bytes / 1_073_741_824;
@@ -59,35 +64,67 @@ function formatSize(bytes?: number): string {
 export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelManagerProps) {
   const setConsoleMsg = useSetAtom(consoleMsgAtom);
   const [localModels, setLocalModels] = useState<OllamaModel[]>([]);
-  const [config, setConfig] = useState<ModelConfig>({ llm_model: "gemma4:e4b-mlx", embed_model: "nomic-embed-text-v2-moe:latest" });
+  const [config, setConfig] = useState<ModelConfig>({ llm_model: "", embed_model: "" });
   const [activeTab, setActiveTab] = useState<"llm" | "embed">("llm");
   const [pullingModel, setPullingModel] = useState<string | null>(null);
   const [pullProgress, setPullProgress] = useState<PullProgress | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState<"checking" | "online" | "offline">("checking");
 
-  const fetchLocalModels = useCallback(async () => {
+  const isInstalled = useCallback(
+    (name: string) => {
+      if (!name) return false;
+      const norm = normalizeModelName(name);
+      return localModels.some((m) => m.name === name || normalizeModelName(m.name) === norm);
+    },
+    [localModels]
+  );
+
+  const refreshData = useCallback(async () => {
     try {
-      const models = await invoke<OllamaModel[]>("list_local_models");
-      setLocalModels(models);
-      setOllamaStatus("online");
+      const [models, cfg] = await Promise.all([
+        invoke<OllamaModel[]>("list_local_models").catch(() => null),
+        invoke<ModelConfig>("get_model_config").catch(() => null),
+      ]);
+
+      if (models !== null) {
+        setLocalModels(models);
+        setOllamaStatus("online");
+
+        if (cfg) {
+          const norm = (n: string) => (n.endsWith(":latest") ? n.slice(0, -7) : n);
+          const isModelInList = (name: string) => {
+            if (!name) return false;
+            const n = norm(name);
+            return models.some((m) => m.name === name || norm(m.name) === n);
+          };
+
+          const validLlm = isModelInList(cfg.llm_model) ? cfg.llm_model : "";
+          const validEmbed = isModelInList(cfg.embed_model) ? cfg.embed_model : "";
+
+          const validatedConfig = { llm_model: validLlm, embed_model: validEmbed };
+          setConfig(validatedConfig);
+
+          if (validLlm !== cfg.llm_model || validEmbed !== cfg.embed_model) {
+            invoke("set_model_config", { llmModel: validLlm, embedModel: validEmbed }).catch(() => {});
+            onConfigChange(validatedConfig);
+          }
+        }
+      } else {
+        setOllamaStatus("offline");
+        if (cfg) {
+          setConfig(cfg);
+        }
+      }
     } catch {
       setOllamaStatus("offline");
     }
-  }, []);
-
-  const fetchConfig = useCallback(async () => {
-    try {
-      const cfg = await invoke<ModelConfig>("get_model_config");
-      setConfig(cfg);
-    } catch { }
-  }, []);
+  }, [onConfigChange]);
 
   useEffect(() => {
     if (isOpen) {
-      fetchLocalModels();
-      fetchConfig();
+      refreshData();
     }
-  }, [isOpen, fetchLocalModels, fetchConfig]);
+  }, [isOpen, refreshData]);
 
   // Listen for pull progress / complete / error events.
   // We collect unlisten functions in an array so cleanup works even if the
@@ -101,12 +138,52 @@ export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelM
         listen<PullProgress>("model-pull-progress", (e) => {
           if (isMounted) setPullProgress(e.payload);
         }),
-        listen<string>("model-pull-complete", (e) => {
+        listen<string>("model-pull-complete", async (e) => {
           if (!isMounted) return;
+          const downloadedModel = e.payload;
           setPullingModel(null);
           setPullProgress(null);
-          fetchLocalModels();
-          setConsoleMsg(`✓ "${e.payload}" downloaded successfully!`);
+          setConsoleMsg(`✓ "${downloadedModel}" downloaded successfully!`);
+
+          try {
+            const models = await invoke<OllamaModel[]>("list_local_models");
+            if (!isMounted) return;
+            setLocalModels(models);
+            setOllamaStatus("online");
+
+            const isEmbed =
+              POPULAR_EMBED_MODELS.some(
+                (m) =>
+                  m.name === downloadedModel ||
+                  normalizeModelName(m.name) === normalizeModelName(downloadedModel)
+              ) || downloadedModel.toLowerCase().includes("embed");
+
+            setConfig((prev) => {
+              let updated = { ...prev };
+              let changed = false;
+              if (isEmbed) {
+                if (!prev.embed_model) {
+                  updated.embed_model = downloadedModel;
+                  changed = true;
+                }
+              } else {
+                if (!prev.llm_model) {
+                  updated.llm_model = downloadedModel;
+                  changed = true;
+                }
+              }
+              if (changed) {
+                invoke("set_model_config", {
+                  llmModel: updated.llm_model,
+                  embedModel: updated.embed_model,
+                }).catch(() => {});
+                onConfigChange(updated);
+              }
+              return updated;
+            });
+          } catch {
+            refreshData();
+          }
         }),
         listen<string>("model-pull-error", (e) => {
           if (!isMounted) return;
@@ -129,7 +206,7 @@ export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelM
       isMounted = false;
       unlistenFns.forEach((fn) => fn());
     };
-  }, [fetchLocalModels, setConsoleMsg]);
+  }, [refreshData, onConfigChange, setConsoleMsg]);
 
   const handlePull = async (modelName: string) => {
     if (pullingModel) return;
@@ -155,7 +232,30 @@ export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelM
     try {
       await invoke("delete_ollama_model", { name: modelName });
       setConsoleMsg(`Deleted ${modelName}`);
-      fetchLocalModels();
+
+      const normDeleted = normalizeModelName(modelName);
+      setConfig((prev) => {
+        let updated = { ...prev };
+        let changed = false;
+        if (prev.llm_model === modelName || normalizeModelName(prev.llm_model) === normDeleted) {
+          updated.llm_model = "";
+          changed = true;
+        }
+        if (prev.embed_model === modelName || normalizeModelName(prev.embed_model) === normDeleted) {
+          updated.embed_model = "";
+          changed = true;
+        }
+        if (changed) {
+          invoke("set_model_config", {
+            llmModel: updated.llm_model,
+            embedModel: updated.embed_model,
+          }).catch(() => {});
+          onConfigChange(updated);
+        }
+        return updated;
+      });
+
+      refreshData();
     } catch (e) {
       setConsoleMsg(`Delete failed: ${e}`);
     }
@@ -184,8 +284,6 @@ export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelM
       setConsoleMsg(`Error: ${e}`);
     }
   };
-
-  const isInstalled = (name: string) => localModels.some(m => m.name === name);
 
   if (!isOpen) return null;
 
@@ -227,12 +325,16 @@ export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelM
         <div className="active-config-banner">
           <div className="config-item">
             <span className="config-label">🤖 LLM</span>
-            <span className="config-value">{config.llm_model}</span>
+            <span className="config-value">
+              {isInstalled(config.llm_model) ? config.llm_model : "None selected"}
+            </span>
           </div>
           <div className="config-divider" />
           <div className="config-item">
             <span className="config-label">🔢 Embeddings</span>
-            <span className="config-value">{config.embed_model}</span>
+            <span className="config-value">
+              {isInstalled(config.embed_model) ? config.embed_model : "None selected"}
+            </span>
           </div>
         </div>
 
@@ -290,28 +392,31 @@ export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelM
                 Installed Locally
               </h3>
               <div className="model-grid">
-                {localModels.map(m => (
-                  <div key={m.name} className={`model-card installed ${activeModel === m.name ? "is-active" : ""}`}>
-                    <div className="model-card-info">
-                      <span className="model-card-name">{m.name}</span>
-                      <span className="model-card-size">{formatSize(m.size)}</span>
-                    </div>
-                    <div className="model-card-actions">
-                      {activeModel === m.name ? (
-                        <span className="active-badge">✓ Active</span>
-                      ) : (
-                        <button className="model-btn use-btn" onClick={() => setActive(m.name)}>
-                          Use
+                {localModels.map(m => {
+                  const isMatch = activeModel === m.name || (activeModel !== "" && normalizeModelName(activeModel) === normalizeModelName(m.name));
+                  return (
+                    <div key={m.name} className={`model-card installed ${isMatch ? "is-active" : ""}`}>
+                      <div className="model-card-info">
+                        <span className="model-card-name">{m.name}</span>
+                        <span className="model-card-size">{formatSize(m.size)}</span>
+                      </div>
+                      <div className="model-card-actions">
+                        {isMatch ? (
+                          <span className="active-badge">✓ Active</span>
+                        ) : (
+                          <button className="model-btn use-btn" onClick={() => setActive(m.name)}>
+                            Use
+                          </button>
+                        )}
+                        <button className="model-btn delete-btn" onClick={() => handleDelete(m.name)} title="Delete">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                          </svg>
                         </button>
-                      )}
-                      <button className="model-btn delete-btn" onClick={() => handleDelete(m.name)} title="Delete">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                        </svg>
-                      </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -327,7 +432,8 @@ export default function ModelManager({ isOpen, onClose, onConfigChange }: ModelM
             <div className="catalog-grid">
               {catalogModels.map(m => {
                 const installed = isInstalled(m.name);
-                const isActive = activeModel === m.name || (installed && activeModel.startsWith(m.name.split(":")[0]));
+                const isMatch = activeModel === m.name || (activeModel !== "" && normalizeModelName(activeModel) === normalizeModelName(m.name));
+                const isActive = installed && isMatch;
                 const isPulling = pullingModel === m.name;
                 return (
                   <div key={m.name} className={`catalog-card ${installed ? "installed" : ""} ${isActive ? "is-active" : ""}`}>
